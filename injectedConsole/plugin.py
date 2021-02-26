@@ -5,6 +5,7 @@
 import base64
 import os
 import pickle
+import platform
 import sys
 import traceback
 
@@ -12,7 +13,6 @@ from collections import namedtuple
 from tempfile import NamedTemporaryFile
 from typing import Any, Mapping, Iterable, MutableMapping, Optional, Union
 
-from util import usepip
 from util.dictattr import DictAttr
 from util.terminal import start_terminal
 from util.console import start_specific_python_console, list_shells
@@ -25,6 +25,11 @@ def abort():
     'abort console to discard all changes'
     open('abort.exists', 'wb').close()
     os._exit(1)
+
+
+def exit():
+    'exit with status 0'
+    os._exit(0)
 
 
 def check_abort() -> bool:
@@ -40,7 +45,7 @@ def restart_program(argv=None):
 
 
 def reload_to_shell(shell):
-    'reload to another shell'
+    'Restart the program and reload to another shell'
     are_u_sure = input('reload shell will discrad all local variables'
                        ', are you sure? ([y]/n) ').strip()
     if are_u_sure and not are_u_sure.startswith(('y', 'Y')):
@@ -64,6 +69,13 @@ def reload_to_shell(shell):
             argv[idx: idx+2] = ['--prev-shell', prev_shell]
     dump_wrapper()
     restart_program(argv)
+
+
+def reload_to_embeded_shell(shell, namespace=None):
+    'reload to another embedded shell'
+    if namespace is None:
+        namespace = sys._getframe(1).f_locals
+    start_specific_python_console(namespace, '', shell)
 
 
 def back():
@@ -146,6 +158,8 @@ def _get_container() -> Mapping:
 
 
 def main(args):
+    from util import usepip
+
     global PATH
 
     os.chdir(PATH.outdir)
@@ -173,8 +187,11 @@ def main(args):
             'path': PATH, 
             'func': DictAttr(
                 abort=abort,
+                exit=exit,
                 list_shells=list_shells,
-                reload_to_shell=reload_to_shell,
+                reload_to_shell=reload_to_embeded_shell 
+                                if platform.system() == 'Windows'
+                                else reload_to_shell,
                 install=usepip.install,
                 uninstall=usepip.uninstall,
                 execute_pip=usepip.execute_pip,
