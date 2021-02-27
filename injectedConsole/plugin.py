@@ -8,6 +8,7 @@ import pickle
 import platform
 import sys
 import traceback
+import warnings
 
 from collections import namedtuple
 from tempfile import NamedTemporaryFile
@@ -20,7 +21,7 @@ from util.console import start_specific_python_console, list_shells
 
 wrapper: Any
 
-PLATFORM_IS_WINDOWS = platform.system() == 'Windows'
+PLATFORM_IS_WINDOWS: bool = platform.system() == 'Windows'
 
 
 def abort():
@@ -162,6 +163,18 @@ def _get_container() -> Mapping:
 def main(args):
     from util import usepip
 
+    if PLATFORM_IS_WINDOWS:
+        try:
+            # USER_BASE 通常是基础模块所在的目录
+            # USER_SITE 通常是第三方模块被安装在的 site-packages 目录
+            __import__('pip')
+        except ImportError:
+            warnings.warn(
+                '在 Windows 平台上，请不要使用 Sigil 自带的 Python 运行环境，因为这是有缺陷的。\n\
+                建议到官网下载并安装最新版 https://www.python.org/downloads/\n\
+                。然后点开 【Sigil 软件】->【插件】->【插件管理】 界面，去掉【使用捆绑的python】的打勾\
+                ，再点击【识别】按钮，就可以自动识别已安装的 Python 运行环境')
+
     global PATH
 
     os.chdir(PATH.outdir)
@@ -203,16 +216,6 @@ def main(args):
 
 
 def run(bc):
-    if PLATFORM_IS_WINDOWS:
-        try:
-            from site import USER_BASE, USER_SITE
-        except ImportError:
-            print('在 Windows 平台上，请不要使用 Sigil 自带的 Python 运行环境，因为这是有缺陷的。',
-                  '建议到官网下载并安装最新版 https://www.python.org/downloads/',
-                  '。然后点开 【Sigil 软件】->【插件】->【插件管理】 界面，去掉【使用捆绑的python】的打勾'
-                  '，再点击【识别】按钮，就可以自动识别已安装的 Python 运行环境', sep='\n')
-            return 1
-
     global PATH
 
     laucher_file, ebook_root, outdir, _, target_file = sys.argv

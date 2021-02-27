@@ -6,12 +6,17 @@
 #   - https://python-prompt-toolkit.readthedocs.io/en/latest/
 
 from functools import update_wrapper
+from typing import Optional
 
 
 __all__ = [
-    'DEFAULT_PYTHON_SHELLS', 'list_shells', 'get_shell_embed_func', 
-    'start_python_console', 'start_specific_python_console'
+    '__shell__', 'DEFAULT_PYTHON_SHELLS', 'PYTHON_SHELL_REQUIREMENTS', 
+    'list_shells', 'get_shell_embed_func', 'start_python_console', 
+    'start_specific_python_console'
 ]
+
+
+__shell__: Optional[str] = None
 
 
 def _embed_ipython_shell(namespace={}, banner=''):
@@ -109,7 +114,18 @@ PYTHON_SHELL_REQUIREMENTS = odict([
 
 
 def list_shells():
-    return list(DEFAULT_PYTHON_SHELLS)
+    '''List all registered shells, return a dictionary of shell names 
+    and Installed flags (True: installed, False: otherwise)
+    '''
+    shells = {}
+    for k in DEFAULT_PYTHON_SHELLS:
+        try:
+            DEFAULT_PYTHON_SHELLS[k]()
+        except ImportError:
+            shells[k] = False
+        else:
+            shells[k] = True
+    return shells
 
 
 def get_shell_embed_func(shells=None, shell_embed_mapping=None):
