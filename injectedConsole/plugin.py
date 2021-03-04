@@ -23,10 +23,9 @@ from utils.dictattr import DictAttr
 from utils.terminal import start_terminal
 
 
+PLATFORM_IS_WINDOWS: bool = platform.system() == 'Windows'
 
 wrapper: Any
-
-PLATFORM_IS_WINDOWS: bool = platform.system() == 'Windows'
 
 
 def abort():
