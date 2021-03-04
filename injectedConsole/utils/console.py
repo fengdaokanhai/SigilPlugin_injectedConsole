@@ -13,10 +13,7 @@ __version__ = (0, 0, 1)
 from functools import update_wrapper
 from typing import Optional
 
-if __name__ == '__main__':
-    from usepip import install # type: ignore
-else:
-    from .usepip import install
+_AS_MAIN_MODULE = __name__ == '__main__'
 
 
 __all__ = [
@@ -191,11 +188,15 @@ def start_specific_python_console(namespace=None, banner='', shell=None):
         try:
             DEFAULT_PYTHON_SHELLS[shell]()
         except ImportError:
+            if _AS_MAIN_MODULE:
+                from usepip import install # type: ignore
+            else:
+                from .usepip import install
             install(*PYTHON_SHELL_REQUIREMENTS[shell])
         return start_python_console(namespace, banner, (shell,))
 
 
-if __name__ == '__main__':
+if _AS_MAIN_MODULE:
     from argparse import ArgumentParser
 
     from colored import colored # type: ignore
