@@ -1,3 +1,7 @@
+__author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
+__version__ = (0, 0, 1)
+
+
 from collections.abc import MutableMapping
 
 
@@ -6,7 +10,7 @@ __all__ = ['DictAttr']
 
 class DictAttr(MutableMapping):
     """Implements the MutableMapping protocol 
-    for modifying objects' __dict__."""
+    for modifying objects's __dict__."""
     def __init__(self, *args, **kwargs):
         self.__dict__ = dict(*args, **kwargs)
 

@@ -2,6 +2,9 @@
 #   - https://github.com/Sigil-Ebook/Sigil/blob/master/src/Resource_Files/plugin_launchers/python/launcher.py
 #   - https://github.com/Sigil-Ebook/Sigil/tree/master/docs
 
+__author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
+__version__ = (0, 1, 5)
+
 import base64
 import os
 import pickle
@@ -14,9 +17,11 @@ from collections import namedtuple
 from tempfile import NamedTemporaryFile
 from typing import Any, Mapping, Iterable, MutableMapping, Optional, Union
 
-from util.dictattr import DictAttr
-from util.terminal import start_terminal
-from util.console import start_specific_python_console, list_shells
+from utils.colored import colored
+from utils.console import get_current_shell, list_shells, start_specific_python_console
+from utils.dictattr import DictAttr
+from utils.terminal import start_terminal
+
 
 
 wrapper: Any
@@ -30,9 +35,12 @@ def abort():
     os._exit(1)
 
 
-def exit():
-    'exit with status 0'
-    os._exit(0)
+def exit(status=0):
+    '''exit with status, this may lose all modifications,
+    please use the exit method (It could be 'exit', 'quit', or Ctrl-D, etc.) 
+    provided by the environment
+    '''
+    os._exit(status)
 
 
 def check_abort() -> bool:
@@ -57,7 +65,7 @@ def reload_to_shell(shell):
     try:
         idx = argv.index('--shell')
     except ValueError:
-        from util import console
+        from utils import console
         prev_shell = getattr(console, '__shell__', None)
         argv.extend(('--shell', shell))
     else:
@@ -98,7 +106,7 @@ def back():
             argv.extend(('--shell', prev_shell))
         else:
             argv[idx: idx + 2] = ['--shell', prev_shell]
-        print('\x1b[33;1m%s\x1b[0m' % '[WARRNING]', 'back to shell:', prev_shell)
+        print(colored('[WARRNING]', 'yellow', attrs=['bold']), 'back to shell:', prev_shell)
         restart_program(argv)
 
 
@@ -161,19 +169,25 @@ def _get_container() -> Mapping:
 
 
 def main(args):
-    from util import usepip
+    from utils import usepip
 
     if PLATFORM_IS_WINDOWS:
         try:
-            # USER_BASE 通常是基础模块所在的目录
-            # USER_SITE 通常是第三方模块被安装在的 site-packages 目录
+            # 检查能否引入 pip 模块
             __import__('pip')
         except ImportError:
-            warnings.warn(
-                '在 Windows 平台上，请不要使用 Sigil 自带的 Python 运行环境，因为这是有缺陷的。\n\
-                建议到官网下载并安装最新版 https://www.python.org/downloads/\n\
-                。然后点开 【Sigil 软件】->【插件】->【插件管理】 界面，去掉【使用捆绑的python】的打勾\
-                ，再点击【识别】按钮，就可以自动识别已安装的 Python 运行环境')
+            warnings.warn('can not import pip module', ImportWarning)
+            # 如果不能引入，说明可能存在不能安装的原因
+            try:
+                # USER_BASE 通常是基础模块所在的目录
+                # USER_SITE 通常是第三方模块被安装在的 site-packages 目录
+                from site import USER_BASE, USER_SITE
+            except ImportError:
+                warnings.warn('''
+在 Windows 平台上，请不要使用 Sigil 自带的 Python 运行环境，因为这是有缺陷的。
+建议到官网下载并安装最新版 https://www.python.org/downloads/
+。然后点开 【Sigil 软件】->【插件】->【插件管理】 界面，去掉【使用捆绑的python】的打勾
+，再点击【识别】按钮，就可以自动识别已安装的 Python 运行环境''')
 
     global PATH
 
@@ -203,6 +217,7 @@ def main(args):
             'func': DictAttr(
                 abort=abort,
                 exit=exit,
+                get_current_shell=get_current_shell,
                 list_shells=list_shells,
                 reload_to_shell=reload_to_embeded_shell 
                                 if PLATFORM_IS_WINDOWS
@@ -254,7 +269,7 @@ if __name__ == '__main__':
     try:
         main(args)
     except BaseException as exc:
-        print('\x1b[31;1m%s\x1b[0m' % '[ERROR]')
+        print(colored('[ERROR]', 'red', attrs=['bold']))
         traceback.print_exc()
         back()
 

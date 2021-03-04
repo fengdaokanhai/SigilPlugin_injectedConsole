@@ -1,3 +1,5 @@
+#! /usr/bin/env python3
+
 # Fork From: https://github.com/scrapy/scrapy/blob/master/scrapy/utils/console.py
 # Reference:
 #   - https://github.com/django/django/blob/master/django/core/management/commands/shell.py
@@ -5,14 +7,22 @@
 #   - https://flask-shellplus.readthedocs.io/en/latest/
 #   - https://python-prompt-toolkit.readthedocs.io/en/latest/
 
+__author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
+__version__ = (0, 0, 1)
+
 from functools import update_wrapper
 from typing import Optional
+
+if __name__ == '__main__':
+    from usepip import install # type: ignore
+else:
+    from .usepip import install
 
 
 __all__ = [
     '__shell__', 'DEFAULT_PYTHON_SHELLS', 'PYTHON_SHELL_REQUIREMENTS', 
-    'list_shells', 'get_shell_embed_func', 'start_python_console', 
-    'start_specific_python_console'
+    'get_current_shell', 'list_shells', 'get_shell_embed_func', 
+    'start_python_console', 'start_specific_python_console'
 ]
 
 
@@ -113,6 +123,10 @@ PYTHON_SHELL_REQUIREMENTS = odict([
 ])
 
 
+def get_current_shell():
+    return __shell__
+
+
 def list_shells():
     '''List all registered shells, return a dictionary of shell names 
     and Installed flags (True: installed, False: otherwise)
@@ -177,7 +191,6 @@ def start_specific_python_console(namespace=None, banner='', shell=None):
         try:
             DEFAULT_PYTHON_SHELLS[shell]()
         except ImportError:
-            from util.usepip import install
             install(*PYTHON_SHELL_REQUIREMENTS[shell])
         return start_python_console(namespace, banner, (shell,))
 
@@ -185,18 +198,19 @@ def start_specific_python_console(namespace=None, banner='', shell=None):
 if __name__ == '__main__':
     from argparse import ArgumentParser
 
-    bold = lambda s: '\x1b[1m%s\x1b[0m' % s
+    from colored import colored # type: ignore
 
     ap = ArgumentParser(
         description='Start Python Interactive REPL Environment. If not specified '
                     '(means all is specified), or more than one is specified, '
                     'tries to use the first available shell in the specified shells, '
                     'in the order of %(shells)s.'
-                    % {'shells' : (' > '.join(map(bold, DEFAULT_PYTHON_SHELLS)))})
+                    % {'shells' : (' > '.join(colored(sh, attrs=['bold']) 
+                                              for sh in DEFAULT_PYTHON_SHELLS))})
     for shell in DEFAULT_PYTHON_SHELLS:
         ap.add_argument(
             '--'+shell, action='store_true', dest=shell,
-            help='Tells me to use Interactive REPL Environment: ' + bold(shell))
+            help='Tells me to use Interactive REPL Environment: ' + colored(shell, attrs=['bold']))
 
     args = ap.parse_args()
     shell_ = next((k for k, v in args.__dict__.items() if v), None)

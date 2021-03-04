@@ -1,8 +1,14 @@
+#! /usr/bin/env python3
+
 # Reference:
 #   - https://developer.apple.com/library/archive/documentation/AppleScript/Conceptual/AppleScriptLangGuide/introduction/ASLR_intro.html
 #   - https://developer.apple.com/library/archive/documentation/LanguagesUtilities/Conceptual/MacAutomationScriptingGuide/
 #   - https://en.wikibooks.org/wiki/AppleScript_Programming
 #   - https://linux.die.net/man/1/xdg-open
+
+
+__author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
+__version__ = (0, 0, 1)
 
 import os
 import platform
