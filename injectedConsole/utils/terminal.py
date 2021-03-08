@@ -90,14 +90,16 @@ def start_windows_terminal(
             os.remove(f.name)
     else:
         if isinstance(cmd, str):
-            if app in ('powershell', 'powershell.exe'):
+            if app in ('powershell', 'powershell.exe') and cmd.strip():
                 # [The call operator &](https://ss64.com/ps/call.html)
-                start_cmd.append("& " + cmd)
+                start_cmd.append('& ')
+            start_cmd = ' '.join(map(_win_quote, start_cmd))
+            return sprun(start_cmd + cmd, check=True, shell=True)
         else:
             if app in ('powershell', 'powershell.exe') and len(cmd):
                 cmd[0] = '& ' + _win_quote(cmd[0])
             start_cmd.extend(cmd)
-        return sprun(start_cmd, check=True, shell=True)
+            return sprun(start_cmd, check=True, shell=True)
 
 
 def start_linux_terminal(
