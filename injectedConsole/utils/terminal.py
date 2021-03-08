@@ -94,6 +94,8 @@ def start_windows_terminal(
                 # [The call operator &](https://ss64.com/ps/call.html)
                 start_cmd.append("& " + cmd)
         else:
+            if app in ('powershell', 'powershell.exe') and len(cmd):
+                cmd[0] = '& ' + _win_quote(cmd[0])
             start_cmd.extend(cmd)
         return sprun(start_cmd, check=True, shell=True)
 
