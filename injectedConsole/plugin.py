@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# coding=utf-8
+
 # Reference: 
 #   - https://github.com/Sigil-Ebook/Sigil/blob/master/src/Resource_Files/plugin_launchers/python/launcher.py
 #   - https://github.com/Sigil-Ebook/Sigil/tree/master/docs

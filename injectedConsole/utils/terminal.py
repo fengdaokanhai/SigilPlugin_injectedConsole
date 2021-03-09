@@ -1,4 +1,5 @@
-#! /usr/bin/env python3
+#!/usr/bin/env python3
+# coding=utf-8
 
 # Reference:
 #   - https://developer.apple.com/library/archive/documentation/AppleScript/Conceptual/AppleScriptLangGuide/introduction/ASLR_intro.html
@@ -8,32 +9,60 @@
 
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
+__version__ = (0, 0, 2)
 
-import os
 import platform
 import re
 
 from enum import Enum
-from subprocess import run as sprun, CompletedProcess
+from os import remove
+from shlex import quote as shlex_quote
+from subprocess import run as sprun, CalledProcessError, CompletedProcess, PIPE
 from tempfile import NamedTemporaryFile
-from typing import cast, Dict, Iterable, Optional, Tuple, Union
+from typing import cast, Dict, List, Optional, Sequence, Union
 
 try:
     from shlex import join as shlex_join # type: ignore
 except ImportError:
-    from shlex import quote
-
-    def shlex_join(split_command):
+    def shlex_join(split_command: Sequence[str]) -> str:
         """Return a shell-escaped string from *split_command*."""
-        return ' '.join(quote(arg) for arg in split_command)
+        return ' '.join(map(shlex_quote, split_command))
 
 
-__all__ = ['start_terminal', 'start_windows_terminal', 'start_linux_terminal', 
+__all__ = ['start_terminal', 'shlex_quote', 'shlex_join', 'winsh_quote', 'winsh_join', 
+           'get_debian_default_app', 'start_windows_terminal', 'start_linux_terminal', 
            'AppleScriptWaitEvent', 'start_macosx_terminal', 'open_macosx_terminal']
 
 
+def winsh_quote(part, _cre=re.compile(r'\s')):
+    ''
+    part = part.strip().replace(r'"', r'\"')
+    if _cre.search(part) is not None:
+        part = r'"%s"' % part
+    return part
+
+
+def winsh_join(split_command: Sequence[str]) -> str:
+    """Return a shell-escaped string from *split_command*."""
+    return ' '.join(map(winsh_quote, split_command))
+
+
+def get_debian_default_app(field: Union[bytes, str]) -> Optional[str]:
+    ''
+    if isinstance(field, str):
+        field = field.encode('utf-8')
+    rt = sprun(
+        'update-alternatives --get-selections', 
+        check=True, shell=True, stdout=PIPE)
+    return next((
+        row.rsplit(maxsplit=1)[-1].decode('utf-8') 
+        for row in rt.stdout.split(b'\n') 
+        if row.startswith(b'%s '%field)
+    ), None)
+
+
 def start_terminal(cmd, **kwargs) -> CompletedProcess:
+    ''
     sys = platform.system()
     if sys == 'Windows':
         return start_windows_terminal(cmd, **kwargs)
@@ -46,32 +75,25 @@ def start_terminal(cmd, **kwargs) -> CompletedProcess:
             'start terminal of other system %r is unavailable' % sys)
 
 
-def _win_quote(part, _cre=re.compile(r'\s')):
-    if '"' in part:
-        part = part.replace('"', '\\"')
-    if _cre.search(part):
-        part = '"%s"' % part
-    return part
-
-
 def start_windows_terminal(
-    cmd: Union[str, Iterable[str]], 
+    cmd: Union[str, Sequence[str]], 
     app: Optional[str] = 'powershell',
+    app_args: Union[None, Sequence[str]] = None,
     wait: bool = True,
     with_tempfile: bool = False,
     tempfile_suffix: str = '.cmd',
-    app_args: Union[None, Tuple[str]] = None,
 ) -> CompletedProcess:
-    start_cmd = ['start']
+    ''
+    split_command: List[str] = ['start']
     if wait:
-        start_cmd.append('/wait')
+        split_command.append('/wait')
     if app:
-        start_cmd.append(app)
+        split_command.append(app)
         if app_args is None:
             if app in ('cmd', 'cmd.exe'):
-                start_cmd.append('/c')
+                split_command.append('/c')
         else:
-            start_cmd.extend(app_args)
+            split_command.extend(app_args)
     if with_tempfile:
         # In Windows, file is occupied when is opening, until it is closed.
         # Like lock, anyone cannot open the file while it is occupied.
@@ -80,39 +102,76 @@ def start_windows_terminal(
         try:
             with f:
                 if not isinstance(cmd, str):
-                    cmd = ' '.join(map(_win_quote, cmd))
-                    cmd = cast(str, cmd)
+                    cmd = cast(str, winsh_join(cmd))
                 f.write(cmd)
-            start_cmd.append(f.name)
-            return sprun(start_cmd, check=True, shell=True)
-        finally:
-            # TODO: We may need to wait until the file is no longer occupied before deleting it.
-            os.remove(f.name)
-    else:
-        if isinstance(cmd, str):
-            if app in ('powershell', 'powershell.exe') and cmd.strip():
+            if app in ('powershell', 'powershell.exe'):
+                # Reference::
                 # [The call operator &](https://ss64.com/ps/call.html)
-                start_cmd.append('& ')
-            start_cmd = ' '.join(map(_win_quote, start_cmd))
-            return sprun(start_cmd + cmd, check=True, shell=True)
-        else:
-            if app in ('powershell', 'powershell.exe') and len(cmd):
-                cmd[0] = '& ' + _win_quote(cmd[0])
-            start_cmd.extend(cmd)
-            return sprun(start_cmd, check=True, shell=True)
+                split_command.append('&' + winsh_quote(f.name))
+            else:
+                split_command.append(winsh_quote(f.name))
+            return sprun(split_command, check=True, shell=True)
+        finally:
+            # TODO: We may need to wait until the file is no longer 
+            #       occupied before deleting it.
+            remove(f.name)
+    if isinstance(cmd, str):
+        if app in ('powershell', 'powershell.exe') and cmd.strip():
+            split_command.append('&')
+        return sprun(
+            winsh_join(split_command) + ' ' + cmd, 
+            check=True, shell=True)
+    else:
+        if cmd:
+            if app in ('powershell', 'powershell.exe'):
+                split_command.append('& ' + winsh_quote(cmd[0]))
+                split_command.extend(cmd[1:])
+            else:
+                split_command.extend(cmd)
+        return sprun(split_command, check=True, shell=True)
 
 
 def start_linux_terminal(
-    cmd: Union[str, Iterable[str]], 
-    app: Optional[str] = 'xterm', 
-    wait: bool = True,
+    cmd: Union[str, Sequence[str]], 
+    app: Optional[str] = None, 
+    app_args: Union[None, Sequence[str]] = None,
     with_tempfile: bool = False,
     tempfile_suffix: str = '.sh',
     shebang: str = '#!/bin/sh',
 ) -> CompletedProcess:
-    # TODO: to implement terminal app auto-checking
-    # TODO: use xdg-open
-    raise NotImplementedError("start terminal of 'Linux' is unavailable")
+    ''
+    if app is None:
+        try:
+            app = get_debian_default_app('x-terminal-emulator')
+        except CalledProcessError:
+            # TIPS: So far, automatically detect terminal is only for Debian series
+            raise NotImplementedError('Failed to detect the terminal app, '
+                                      'please specify one')
+    if app is None:
+        raise RuntimeError('There is no default terminal app')
+    split_command: List[str] = [app]
+    if app_args is None:
+        # SUPPOSE: All apps except xterm have the -x(--execute) parameter 
+        #          to execute the command.
+        if not app.endswith('xterm'):
+            split_command.append('-x')
+    else:
+        split_command.extend(app_args)
+    if with_tempfile:
+        with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
+            sprun(['chmod', '+x', f.name], check=True)
+            if not isinstance(cmd, str):
+                cmd = cast(str, shlex_join(cmd))
+            f.write('%s\n%s\n' % (shebang, cmd))
+            f.flush()
+            split_command.append(f.name)
+            return sprun(split_command, check=True)
+    if isinstance(cmd, str):
+        return sprun(shlex_join(split_command) + ' ' + cmd, 
+                     check=True, shell=True)
+    else:
+        split_command.extend(cmd)
+        return sprun(split_command, check=True)
 
 
 AppleScriptWaitEvent = Enum('AppleScriptWaitEvent', ('exists', 'busy'))
@@ -125,6 +184,7 @@ def _get_wait_for_str(
         AppleScriptWaitEvent.exists: 'exists',
     },
 ) -> str:
+    ''
     if isinstance(event, str):
         event = AppleScriptWaitEvent[event]
     else:
@@ -134,7 +194,7 @@ def _get_wait_for_str(
 
 
 def start_macosx_terminal(
-    cmd: Union[str, Iterable[str]], 
+    cmd: Union[str, Sequence[str]], 
     app: str = 'Terminal.app',
     wait: bool = True,
     wait_event: Union[int, str, AppleScriptWaitEvent] = AppleScriptWaitEvent.exists,
@@ -142,9 +202,9 @@ def start_macosx_terminal(
     tempfile_suffix: str = '.command',
     shebang: str = '#!/bin/sh',
 ) -> CompletedProcess:
+    ''
     if not isinstance(cmd, str):
-        cmd = shlex_join(cmd)
-        cmd = cast(str, cmd)
+        cmd = cast(str, shlex_join(cmd))
     if wait:
         tpl_command = '''
 tell application "{app}"
@@ -169,32 +229,45 @@ end tell''' % _get_wait_for_str(wait_event)
 
 
 def open_macosx_terminal(
-    cmd: Union[str, Iterable[str]], 
+    cmd: Union[str, Sequence[str]], 
     app: Optional[str] = 'Terminal.app',
+    app_args: Union[None, Sequence[str]] = None,
     wait: bool = True,
     with_tempfile: bool = False,
     tempfile_suffix: str = '.command',
     shebang: str = '#!/bin/sh',
 ) -> CompletedProcess:
-    open_cmd = ['open']
+    ''
+    split_command: List[str] = ['open']
     if wait:
-        open_cmd.append('-W')
+        split_command.append('-W')
     if app:
-        open_cmd.extend(('-a', app))
+        split_command.extend(('-a', app))
+    if app_args:
+         split_command.extend(app_args)
     if with_tempfile:
         with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
             sprun(['chmod', '+x', f.name], check=True)
             if not isinstance(cmd, str):
-                cmd = shlex_join(cmd)
-                cmd = cast(str, cmd)
+                cmd = cast(str, shlex_join(cmd))
             f.write('%s\n%s\n' % (shebang, cmd))
             f.flush()
-            open_cmd.append(f.name)
-            return sprun(open_cmd, check=True)
+            split_command.append(f.name)
+            return sprun(split_command, check=True)
     else:
         if isinstance(cmd, str):
-            open_cmd.append(cmd)
+            return sprun(shlex_join(split_command) + ' ' + cmd, 
+                         check=True, shell=True)
         else:
-            open_cmd.extend(cmd)
-        return sprun(open_cmd, check=True)
+            split_command.extend(cmd)
+            return sprun(split_command, check=True)
+
+
+if __name__ == '__main__':
+    from sys import executable, argv
+    argv = argv[1:]
+    if argv:
+        start_terminal(argv)
+    else:
+        start_terminal(executable)
 

@@ -1,4 +1,5 @@
-#! /usr/bin/env python3
+#!/usr/bin/env python3
+# coding=utf-8
 
 # Reference:
 # https://docs.python.org/3/installing/index.html

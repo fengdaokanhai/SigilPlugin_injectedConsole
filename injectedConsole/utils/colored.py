@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# coding=utf-8
+
 """ANSII Color formatting for output in terminal.
 
 [Reference]
@@ -83,6 +86,7 @@ class RGBColor(BaseColor, namedtuple('RGB', 'red, green, blue')): # 24 bit color
 class HexColor(BaseColor, namedtuple('Hex', 'hexcolor')): # 24 bit color = 16777216 colors
     'See: https://en.wikipedia.org/wiki/ANSI_escape_code#24-bit'
 
+    # TODO: support #[0-9A-Fa-f]{3}'
     def __new__(
         cls, 
         hexcolor: str, 
