@@ -169,7 +169,10 @@ def start_python_console(
         namespace = {}
 
     try:
-        shell, shell_ebf = get_shell_embed_func(shells, shell_embed_mapping)
+        selected_shell = get_shell_embed_func(shells, shell_embed_mapping)
+        if selected_shell is None:
+            raise RuntimeError('Could not get console')
+        shell, shell_ebf = selected_shell
         if shell_ebf is not None:
             __shell__ = shell
             shell_ebf(namespace=namespace, banner=banner)

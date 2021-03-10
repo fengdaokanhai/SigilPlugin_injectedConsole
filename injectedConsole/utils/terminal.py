@@ -5,7 +5,7 @@
 #   - https://developer.apple.com/library/archive/documentation/AppleScript/Conceptual/AppleScriptLangGuide/introduction/ASLR_intro.html
 #   - https://developer.apple.com/library/archive/documentation/LanguagesUtilities/Conceptual/MacAutomationScriptingGuide/
 #   - https://en.wikibooks.org/wiki/AppleScript_Programming
-#   - https://linux.die.net/man/1/xdg-open
+#   - https://linux.die.net/man/8/update-alternatives
 
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
@@ -30,8 +30,9 @@ except ImportError:
 
 
 __all__ = ['start_terminal', 'shlex_quote', 'shlex_join', 'winsh_quote', 'winsh_join', 
-           'get_debian_default_app', 'start_windows_terminal', 'start_linux_terminal', 
-           'AppleScriptWaitEvent', 'start_macosx_terminal', 'open_macosx_terminal']
+           'get_debian_default_app', 'set_debian_default_app', 'start_windows_terminal', 
+           'start_linux_terminal', 'AppleScriptWaitEvent', 'start_macosx_terminal', 
+           'open_macosx_terminal']
 
 
 def winsh_quote(part, _cre=re.compile(r'\s')):
@@ -59,6 +60,11 @@ def get_debian_default_app(field: Union[bytes, str]) -> Optional[str]:
         for row in rt.stdout.split(b'\n') 
         if row.startswith(b'%s '%field)
     ), None)
+
+
+def set_debian_default_app(field: str) -> CompletedProcess:
+    ''
+    return sprun(['update-alternatives', '--config', field])
 
 
 def start_terminal(cmd, **kwargs) -> CompletedProcess:

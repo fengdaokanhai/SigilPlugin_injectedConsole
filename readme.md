@@ -18,6 +18,7 @@ TODO: to be continued...
 - [EPUB 3.0](http://idpf.org/epub/30/)
 - [EPUB 3 COMMUNITY GROUP](https://www.w3.org/community/epub3/)
 - [Sigil repo](https://fossies.org/linux/Sigil/)
+- [Sigil github repository docs directory](https://github.com/Sigil-Ebook/Sigil/tree/master/docs)
 - [Sigil_Plugin_Framework_rev12.epub](https://fossies.org/linux/Sigil/docs/Sigil_Plugin_Framework_rev12.epub)
 
 ## Resources
