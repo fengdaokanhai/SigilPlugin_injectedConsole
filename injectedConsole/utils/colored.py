@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-# coding=utf-8
+# coding: utf-8
 
 """ANSII Color formatting for output in terminal.
 
 [Reference]
-https://misc.flogisoft.com/bash/tip_colors_and_formatting
-https://en.wikipedia.org/wiki/ANSI_escape_code
-https://pypi.org/project/termcolor/
+[Colors and formatting (ANSI/VT100 Control sequences)](https://misc.flogisoft.com/bash/tip_colors_and_formatting)
+[ANSI escape code](https://en.wikipedia.org/wiki/ANSI_escape_code)
+[rich](https://pypi.org/project/rich/)
+[blessings](https://pypi.org/project/blessings/)
+[colorama](https://pypi.org/project/colorama/)
+[termcolor](https://pypi.org/project/termcolor/)
+[search@pypi.org:color](https://pypi.org/search/?q=color)
 """
 
 from __future__ import annotations
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
+__version__ = (0, 0, 2)
 
-from collections import namedtuple
 from abc import ABC, abstractproperty
+from collections import namedtuple
 from typing import Optional, Sequence, Tuple, Union
 
 

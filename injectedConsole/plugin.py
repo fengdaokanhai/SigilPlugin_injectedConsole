@@ -112,6 +112,17 @@ def back():
         restart_program(argv)
 
 
+# TODO: Implement the following functions
+def runfile(path):
+    raise NotImplementedError
+def load_file(path):
+    raise NotImplementedError
+def load_package(path, main_module_name='__init__.py'):
+    raise NotImplementedError
+def load_zipped_package(path, main_module_name='__init__.py'):
+    raise NotImplementedError
+
+
 def dump_wrapper(wrapper=None):
     'dump wrapper to file'
     global WRAPPER
