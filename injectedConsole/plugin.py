@@ -4,13 +4,14 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 6)
+__stage__ = 'rev2'
 
 from os import chdir, path
 from pickle import dump as pickle_dump, load as pickle_load
 from sys import argv, executable
 
-from util.encode_args import b64encode_pickle
-from util.terminal import start_terminal
+from plugin_util.encode_args import b64encode_pickle
+from plugin_util.terminal import start_terminal
 
 
 def run(bc):

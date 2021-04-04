@@ -1,6 +1,7 @@
-from os import _exit, execl, path
+from os import _exit, execl
 from pickle import load as pickle_load, dump as pickle_dump
 from sys import _getframe, argv, executable
+from subprocess import run as sprun
 from typing import Any, Mapping
 
 from bookcontainer import BookContainer # type: ignore
@@ -8,21 +9,22 @@ from inputcontainer import InputContainer # type: ignore
 from outputcontainer import OutputContainer # type: ignore
 from validationcontainer import ValidationContainer # type: ignore
 
-from util.dictattr import DictAttr
-from util.colored import colored
-from util.console import get_current_shell, list_shells, start_specific_python_console
-from util.usepip import install, uninstall, execute_pip
+from plugin_util.dictattr import DictAttr
+from plugin_util.colored import colored
+from plugin_util.console import get_current_shell, list_shells, start_specific_python_console
+from plugin_util.usepip import install, uninstall, execute_pip
 
 
 __all__ = [
     'install', 'uninstall', 'execute_pip', 'restart_program', 'abort', 'exit', 
     'dump_wrapper', 'load_wrapper', 'get_container', 'get_current_shell', 
     'list_shells', 'reload_shell', 'reload_embeded_shell', 'reload_to_shell', 
+    'start_qtconsole', 'start_jupyter_notebook', 'start_jupyter_lab',
 ]
 
 
-OUTPUT_DIR = getattr(__builtins__, '_PATH', {'outdir': ''})['outdir']
 WRAPPER: Any = None
+_SYSTEM_IS_WINDOWS: bool = __import__('platform').system() == 'Windows'
 
 
 def restart_program(argv=argv):
@@ -30,9 +32,9 @@ def restart_program(argv=argv):
     execl(executable, executable, *argv)
 
 
-def abort(_path=path.join(OUTPUT_DIR, 'abort.exists')):
+def abort():
     'Abort console to discard all changes.'
-    open(_path, 'wb').close()
+    open('abort.exists', 'wb').close()
     _exit(1)
 
 
@@ -42,8 +44,8 @@ def exit():
     _exit(0)
 
 
-def _create_env_py(path=path.join(OUTPUT_DIR, 'env.py')):
-    open(path, 'w').write(f'''
+def _create_env_py(name='env'):
+    open(name + '.py', 'w').write(f'''
 # Injecting module pathes
 __sys_path = __import__('sys').path
 __sys_path.insert(0, '{_PATH['this_plugin_dir']}')
@@ -51,34 +53,26 @@ __sys_path.insert(0, '{_PATH['sigil_package_dir']}')
 del __sys_path
 
 # Introducing global variables
-from common.func as func
-
-from common.func import xxx
-from util.console import get_current_shell, list_shells
-from usepip import install, uninstall, execute_pip
-
-# Introducing global variables
-w = wrapper = func.load_wrapper()
-container = func.get_container(wrapper)
+import plugin_help as plugin
+w = wrapper = plugin.load_wrapper()
+container = plugin.get_container(wrapper)
 bc = bookcontainer = container.edit
-#path = PATH 
+
+__import__('atexit').register(plugin.dump_wrapper)
 ''')
 
 
-def dump_wrapper(
-    wrapper=None, 
-    _path=path.join(OUTPUT_DIR, 'wrapper.pkl'),
-):
+def dump_wrapper(wrapper=None):
     'Dump wrapper to file.'
     if wrapper is None:
         wrapper = WRAPPER
-    return pickle_dump(wrapper, open(_path, 'wb'))
+    return pickle_dump(wrapper, open('wrapper.pkl', 'wb'))
 
 
-def load_wrapper(_path=path.join(OUTPUT_DIR, 'wrapper.pkl')):
+def load_wrapper():
     'Load wrapper from file.'
     global WRAPPER
-    WRAPPER = pickle_load(open(_path, 'rb'))
+    WRAPPER = pickle_load(open('wrapper.pkl', 'rb'))
     return WRAPPER
 
 
@@ -107,7 +101,7 @@ def reload_shell(shell):
     try:
         idx = argv_.index('--shell')
     except ValueError:
-        from util import console
+        from plugin_util import console
         prev_shell = getattr(console, '__shell__', None)
         argv_.extend(('--shell', shell))
     else:
@@ -152,13 +146,25 @@ def reload_embeded_shell(shell, banner='', namespace=None):
     start_specific_python_console(namespace, banner, shell)
 
 
-if __import__('platform').system() == 'Windows':
-    reload_to_shell = reload_embeded_shell
-else:
-    reload_to_shell = reload_shell
+reload_to_shell = reload_embeded_shell if _SYSTEM_IS_WINDOWS else reload_shell
+
+
+def start_qtconsole(executable=executable):
+    # TODO: Support for qtconsole: {executable} -m qtconsole arg1 arg2 ...
+    _create_env_py()
+    return sprun([executable, '-m', 'qtconsole'], 
+                 check=True, shell=_SYSTEM_IS_WINDOWS)
 
 
 # TODO: Implement the following functions
+def start_jupyter_notebook(executable=executable):
+    # TODO: Support for jupyter notebook: {executable} -m python -m jupyter notebook arg1 arg2 ...
+    raise NotImplementedError
+
+def start_jupyter_lab(executable=executable):
+    # TODO: Support for jupyter lab: {executable} -m python -m jupyter lab arg1 arg2 ...
+    raise NotImplementedError
+
 def runfile(path):
     raise NotImplementedError
 
@@ -169,17 +175,5 @@ def load_package(path, main_module_name='__init__.py'):
     raise NotImplementedError
 
 def load_zipped_package(path, main_module_name='__init__.py'):
-    raise NotImplementedError
-
-def start_qtconsole(executable=executable):
-    # TODO: Support for qtconsole: {executable} -m qtconsole arg1 arg2 ...
-    raise NotImplementedError
-
-def start_jupyter_notebook(executable=executable):
-    # TODO: Support for jupyter notebook: {executable} -m python -m jupyter notebook arg1 arg2 ...
-    raise NotImplementedError
-
-def start_jupyter_lab(executable=executable):
-    # TODO: Support for jupyter lab: {executable} -m python -m jupyter lab arg1 arg2 ...
     raise NotImplementedError
 

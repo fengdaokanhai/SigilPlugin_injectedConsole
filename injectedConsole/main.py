@@ -19,31 +19,25 @@ ap.add_argument(
 )
 args = ap.parse_args()
 
-from util.encode_args import b64decode_pickle
+from plugin_util.encode_args import b64decode_pickle
 
 _PATH = __builtins__._PATH = b64decode_pickle(args.args)
 
 from os import chdir
-from sys import modules, path
-from traceback import print_exc
-from typing import Any, Mapping, Iterable, MutableMapping, Optional, Union
-from warnings import warn
+from sys import path
 
 chdir(_PATH['outdir'])
 
 path.insert(0, _PATH['this_plugin_dir'])
 path.insert(0, _PATH['sigil_package_dir'])
 
-from util.colored import colored
-from util.console import get_current_shell, list_shells, start_specific_python_console
-from util.dictattr import DictAttr
-from util.terminal import start_terminal
-
-from helper.function import back_shell, get_container, load_wrapper, dump_wrapper
-
-
 try:
-    from util import usepip
+    from warnings import warn
+
+    from plugin_util import usepip
+    from plugin_util.console import start_specific_python_console
+    from plugin_util.terminal import start_terminal
+    from plugin_help.function import get_container, load_wrapper, dump_wrapper
 
     if __import__('platform').system() == 'Windows':
         try:
@@ -66,7 +60,7 @@ try:
     # remap cssutils to css_parser
     try:
         import css_parser # type: ignore
-        modules['cssutils'] = css_parser
+        __import__('sys').modules['cssutils'] = css_parser
     except ImportError:
         pass
 
@@ -76,14 +70,20 @@ try:
     start_specific_python_console({
             'container': container, 
             'bc': container['edit'], 
-            'bookcontainer': container['edit'],
+            'bookcontainer': container['edit'], 
             'w': wrapper, 
             'wrapper': wrapper, 
+            'plugin': __import__('plugin_help'), 
         }, 
-        shell=args.shell
+        shell=args.shell, 
     )
     dump_wrapper(wrapper)
 except BaseException as exc:
+    from traceback import print_exc
+
+    from plugin_util.colored import colored
+    from plugin_help.function import back_shell
+
     print(colored('[ERROR]', 'red', attrs=['bold']))
     print_exc()
     back_shell()
