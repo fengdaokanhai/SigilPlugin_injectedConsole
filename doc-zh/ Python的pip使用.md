@@ -1,4 +1,4 @@
-# PIP PyPI Mirror Sources
+#  Python的pip使用
 
 ## Reference
 - [pip pypi page](https://pypi.org/project/pip/)
@@ -18,7 +18,7 @@
 - poetry
 - flit
 
-## Some pypi mirrors
+## Some PyPI Mirror Sources
 > 官方
 - https://pypi.org/simple/
 > 豆瓣

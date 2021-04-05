@@ -21,7 +21,7 @@ args = ap.parse_args()
 
 from plugin_util.encode_args import b64decode_pickle
 
-_PATH = __builtins__._PATH = b64decode_pickle(args.args)
+_PATH = __import__('builtins')._PATH = b64decode_pickle(args.args)
 
 from os import chdir
 from sys import path

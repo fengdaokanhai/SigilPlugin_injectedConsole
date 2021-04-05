@@ -1,9 +1,13 @@
-from os import _exit, execl
+import os
+import subprocess
+
+from contextlib import contextmanager
+from os import execl, path
 from pickle import load as pickle_load, dump as pickle_dump
 from sys import _getframe, argv, executable
-from subprocess import run as sprun
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
+from wrapper import Wrapper
 from bookcontainer import BookContainer # type: ignore
 from inputcontainer import InputContainer # type: ignore
 from outputcontainer import OutputContainer # type: ignore
@@ -16,15 +20,21 @@ from plugin_util.usepip import install, uninstall, execute_pip
 
 
 __all__ = [
-    'install', 'uninstall', 'execute_pip', 'restart_program', 'abort', 'exit', 
-    'dump_wrapper', 'load_wrapper', 'get_container', 'get_current_shell', 
-    'list_shells', 'reload_shell', 'reload_embeded_shell', 'reload_to_shell', 
-    'start_qtconsole', 'start_jupyter_notebook', 'start_jupyter_lab',
+    'install', 'uninstall', 'execute_pip', 'restart_program', 'run', 'load', 
+    'run_env', 'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 
+    'get_current_shell', 'list_shells', 'reload_shell', 'back_shell', 
+    'reload_embeded_shell', 'reload_to_shell', 'start_qtconsole', 
+    'start_jupyter_notebook', 'start_jupyter_lab', 
 ]
 
 
-WRAPPER: Any = None
 _SYSTEM_IS_WINDOWS: bool = __import__('platform').system() == 'Windows'
+_PATH = __import__('builtins')._PATH
+_OUTDIR = _PATH['outdir']
+_ABORTFILE = path.join(_OUTDIR, 'abort.exists')
+_ENVFILE = path.join(_OUTDIR, 'env.py')
+_PKLFILE = path.join(_OUTDIR, 'wrapper.pkl')
+_WRAPPER: Optional[Wrapper] = None
 
 
 def restart_program(argv=argv):
@@ -32,48 +42,58 @@ def restart_program(argv=argv):
     execl(executable, executable, *argv)
 
 
+def run(path, main_file='main.py'):
+    '''Run a [file] | [program with directory structure], 
+    from a [file] | [directory] | [zipped file] | [...].'''
+    raise NotImplementedError
+
+
+def load(path, module_file='__init__.py'):
+    'Load a [module] | [package], from a [file] | [directory] | [zipped file] | [...].'
+    raise NotImplementedError
+
+
+def run_env():
+    'Run the env file "./env.py", to initialize environment.'
+    run(_ENVFILE)
+
+
 def abort():
     'Abort console to discard all changes.'
-    open('abort.exists', 'wb').close()
-    _exit(1)
+    open(_ABORTFILE, 'wb').close()
+    os._exit(1)
 
 
 def exit():
     'Exit console for no more operations.'
     dump_wrapper()
-    _exit(0)
+    os._exit(0)
 
 
-def _create_env_py(name='env'):
-    open(name + '.py', 'w').write(f'''
-# Injecting module pathes
-__sys_path = __import__('sys').path
-__sys_path.insert(0, '{_PATH['this_plugin_dir']}')
-__sys_path.insert(0, '{_PATH['sigil_package_dir']}')
-del __sys_path
-
-# Introducing global variables
-import plugin_help as plugin
-w = wrapper = plugin.load_wrapper()
-container = plugin.get_container(wrapper)
-bc = bookcontainer = container.edit
-
-__import__('atexit').register(plugin.dump_wrapper)
-''')
-
-
-def dump_wrapper(wrapper=None):
+def dump_wrapper(wrapper: Optional[Wrapper] = None):
     'Dump wrapper to file.'
-    if wrapper is None:
-        wrapper = WRAPPER
-    return pickle_dump(wrapper, open('wrapper.pkl', 'wb'))
+    global _WRAPPER
+    pickle_dump(wrapper or _WRAPPER, open(_PKLFILE, 'wb'))
 
 
-def load_wrapper():
+def load_wrapper(clear: bool = False) -> Wrapper:
     'Load wrapper from file.'
-    global WRAPPER
-    WRAPPER = pickle_load(open('wrapper.pkl', 'rb'))
-    return WRAPPER
+    global _WRAPPER
+    wrapper = pickle_load(open(_PKLFILE, 'rb'))
+    if _WRAPPER is None:
+        _WRAPPER = wrapper
+    else:
+        if clear:
+            _WRAPPER.__dict__.clear()
+        _WRAPPER.__dict__.update(wrapper.__dict__)
+    return _WRAPPER
+
+
+@contextmanager
+def _ctx_wrapper():
+    dump_wrapper()
+    yield _WRAPPER
+    load_wrapper()
 
 
 def get_container(wrapper=None) -> Mapping:
@@ -149,31 +169,47 @@ def reload_embeded_shell(shell, banner='', namespace=None):
 reload_to_shell = reload_embeded_shell if _SYSTEM_IS_WINDOWS else reload_shell
 
 
-def start_qtconsole(executable=executable):
-    # TODO: Support for qtconsole: {executable} -m qtconsole arg1 arg2 ...
-    _create_env_py()
-    return sprun([executable, '-m', 'qtconsole'], 
-                 check=True, shell=_SYSTEM_IS_WINDOWS)
+def start_qtconsole(*args, executable=executable):
+    'start a qtconsole process, and wait until it is terminated'
+    with _ctx_wrapper():
+        subprocess.run([executable, '-m', 'qtconsole', *args], 
+                       check=True, shell=_SYSTEM_IS_WINDOWS)
 
 
-# TODO: Implement the following functions
-def start_jupyter_notebook(executable=executable):
-    # TODO: Support for jupyter notebook: {executable} -m python -m jupyter notebook arg1 arg2 ...
-    raise NotImplementedError
+def start_jupyter_notebook(*args, executable=executable):
+    if not args:
+        args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
+    with _ctx_wrapper():
+        p = subprocess.Popen(
+            [executable, '-m', 'jupyter', 'notebook', *args], 
+            shell=_SYSTEM_IS_WINDOWS, 
+        )
+        try:
+            while True:
+                try:
+                    p.communicate(subprocess.PIPE)
+                    break
+                except KeyboardInterrupt:
+                    pass
+        finally:
+            p.terminate()
 
-def start_jupyter_lab(executable=executable):
-    # TODO: Support for jupyter lab: {executable} -m python -m jupyter lab arg1 arg2 ...
-    raise NotImplementedError
 
-def runfile(path):
-    raise NotImplementedError
-
-def load_file(path):
-    raise NotImplementedError
-
-def load_package(path, main_module_name='__init__.py'):
-    raise NotImplementedError
-
-def load_zipped_package(path, main_module_name='__init__.py'):
-    raise NotImplementedError
+def start_jupyter_lab(*args, executable=executable):
+    if not args:
+        args = ('--notebook-dir="."', '--ServerApp.open_browser=True', '-y')
+    with _ctx_wrapper():
+        p = subprocess.Popen(
+            [executable, '-m', 'jupyter', 'lab', *args], 
+            shell=_SYSTEM_IS_WINDOWS, 
+        )
+        try:
+            while True:
+                try:
+                    p.communicate(subprocess.PIPE)
+                    break
+                except KeyboardInterrupt:
+                    pass
+        finally:
+            p.terminate()
 
