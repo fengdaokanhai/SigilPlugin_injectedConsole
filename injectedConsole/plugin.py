@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 6)
-__stage__ = 'rev6'
+__revision__ = 7
 
 from os import chdir, path
 from pickle import dump as pickle_dump, load as pickle_load
@@ -32,14 +32,14 @@ def run(bc):
 
     pickle_dump(bc._w, open(pklfile, 'wb'))
 
-    open(envfile, 'w').write(
+    open(envfile, 'w', encoding='utf-8').write(
 f'''# Injecting builtins variable: _PATH
 __import__('builtins')._PATH = {pathes!r}
 
 # Injecting module pathes
 __sys_path = __import__('sys').path
-__sys_path.insert(0, '{pathes['this_plugin_dir']}')
-__sys_path.insert(0, '{pathes['sigil_package_dir']}')
+__sys_path.insert(0, {pathes['this_plugin_dir']!r})
+__sys_path.insert(0, {pathes['sigil_package_dir']!r})
 del __sys_path
 
 # Introducing global variables

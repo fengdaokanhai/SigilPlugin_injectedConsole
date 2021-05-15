@@ -53,8 +53,9 @@ def check_pip() -> bool:
             from site import USER_BASE, USER_SITE
         except ImportError:
             print('''Defective Python executable detected.
-Please replace a Python executable with `pip` package, 
-or it can install `pip` package (the `site` module defines available `USER_BASE` and `USER_SITE`).
+Please replace current Python executable with another Python executable with `pip` package, 
+or replace with another Python executable which can install `pip` package 
+(the `site` module defines available `USER_BASE` and `USER_SITE`).
 
 Python official download address: https://www.python.org/downloads/
 
