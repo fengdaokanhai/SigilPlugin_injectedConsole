@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# coding=utf-8
+# coding: utf-8
 
 # Fork From: https://github.com/scrapy/scrapy/blob/master/scrapy/utils/console.py
 # Reference:

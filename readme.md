@@ -4,7 +4,6 @@
 
 TODO: to be continued...
 
-
 ---
 
 ### References
@@ -27,13 +26,17 @@ TODO: to be continued...
 
 #### Selector
 - [lxml](https://pypi.org/project/lxml/)
-- [beautifulsoup4](https://pypi.org/project/beautifulsoup4/)
 - [pyquery](https://pypi.org/project/pyquery/)
+- [beautifulsoup4](https://pypi.org/project/beautifulsoup4/)
 - [parsel](https://pypi.org/project/parsel/)
 - [cssselect](https://pypi.org/project/cssselect/)
 - [cssselect2](https://pypi.org/project/cssselect2/)
 
 #### CSS
+- [cssutils](https://pypi.org/project/cssutils/)
 - [tinycss](https://pypi.org/project/tinycss/)
 - [tinycss2](https://pypi.org/project/tinycss2/)
+
+#### Font
+- [fonttools](https://pypi.org/project/fonttools/)
 

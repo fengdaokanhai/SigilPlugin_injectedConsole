@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 6)
-__stage__ = 'rev4'
+__stage__ = 'rev6'
 
 from os import chdir, path
 from pickle import dump as pickle_dump, load as pickle_load
@@ -47,7 +46,7 @@ del __sys_path
 import plugin_help as plugin
 w = wrapper = plugin.load_wrapper()
 container = plugin.get_container(wrapper)
-bc = bookcontainer = container.edit
+bc = bk = bookcontainer = container.edit
 
 # Callback at exit
 __import__('atexit').register(plugin.dump_wrapper)
@@ -60,6 +59,7 @@ print(
 
     chdir(outdir)
     cmd = [executable, mainfile, '--args', b64encode_pickle(pathes)]
+    # TODO: tui, gui, webui
     start_terminal(cmd)
 
     # check whether the console is aborted.

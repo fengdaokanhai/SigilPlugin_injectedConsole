@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# coding=utf-8
+# coding: utf-8
 
 # Reference:
 #   - https://developer.apple.com/library/archive/documentation/AppleScript/Conceptual/AppleScriptLangGuide/introduction/ASLR_intro.html
@@ -24,7 +24,7 @@ from typing import cast, Dict, List, Optional, Sequence, Union
 try:
     from shlex import join as shlex_join # type: ignore
 except ImportError:
-    def shlex_join(split_command: Sequence[str]) -> str:
+    def shlex_join(split_command: Sequence[str]) -> str: # type: ignore
         """Return a shell-escaped string from *split_command*."""
         return ' '.join(map(shlex_quote, split_command))
 

@@ -4,9 +4,15 @@ This module provides some functions for modifying files in the
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 8)
+__version__ = (0, 0, 9)
+__all__ = [
+    'WriteBack', 'DoNotWriteBack', 'make_element','make_html_element', 
+    'xml_fromstring', 'xml_tostring', 'html_fromstring', 'html_tostring', 
+    'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
+    'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 
+    'EnumSelectorType', 'element_iter', 
+]
 
-from collections import namedtuple
 from contextlib import contextmanager
 from enum import Enum
 from functools import partial
@@ -14,7 +20,7 @@ from inspect import getfullargspec, CO_VARARGS
 from platform import system
 from typing import (
     cast, Any, Callable, ContextManager, Dict, Generator, 
-    Iterable, List, Mapping, Optional, Tuple, Union, 
+    Iterable, List, Mapping, NamedTuple, Optional, Tuple, Union, 
 )
 
 from cssselect.xpath import GenericTranslator # type: ignore
@@ -28,14 +34,6 @@ from lxml.html import ( # type: ignore
     Element as HTMLElement, HtmlElement, HTMLParser, 
 )
 
-
-__all__ = [
-    'WriteBack', 'DoNotWriteBack', 'make_element','make_html_element', 
-    'xml_fromstring', 'xml_tostring', 'html_fromstring', 'html_tostring', 
-    'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
-    'edit_batch', 'edit_html_iter', 'edit_html_batch', 
-    'IterElementInfo', 'EnumSelectorType', 'element_iter', 
-]
 
 _PLATFORM_IS_WINDOWS = system() == 'Windows'
 _HTML_DOCTYPE = b'<!DOCTYPE html>'
@@ -67,19 +65,21 @@ def _ensure_bytes(o: Any) -> bytes:
         return bytes(o)
 
 
-def _posargcount(
-    func: Callable,
-    _T = namedtuple('Result', ('argcount', 'has_varargs')),
-) -> Tuple[int, bool]:
+class _Result(NamedTuple):
+    argcount: int
+    has_varargs: bool
+
+
+def _posargcount(func: Callable) -> Tuple[int, bool]:
     code = getattr(func, '__code__', None)
     if code:
-        return _T(code.co_argcount, bool(code.co_flags & CO_VARARGS))
+        return _Result(code.co_argcount, bool(code.co_flags & CO_VARARGS))
     try:
         argspec = getfullargspec(func)
     except:
-        return _T(0, False)
+        return _Result(0, False)
     else:
-        return _T(len(argspec.args), argspec.varargs is not None)
+        return _Result(len(argspec.args), argspec.varargs is not None)
 
 
 def _make_standard_predicate(
@@ -501,7 +501,7 @@ def edit_iter(
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `href`, `mimetype`), and then determine whether to 
+                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
                       continue processing.
     :param wrap_me: Will pass to function ctx_edit as keyword argument.
     :param yield_cm: Determines whether each iteration returns the context manager.
@@ -568,7 +568,7 @@ def edit_batch(
         /namespace:package/namespace:manifest/namespace:item/@id
     :param operate: Take data in, operate on, and then return the changed data
     :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `href`, `mimetype`), and then determine whether to 
+                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
                       continue processing.
 
     :return: Dictionary, keys are the manifest id of all processed files, values are whether 
@@ -616,10 +616,10 @@ def edit_html_iter(
         An object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub
     :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `href`, `mimetype`), and then determine whether to 
+                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
                       continue processing.
     :param wrap_me: Whether to wrap up object, if True, return a dict containing keys 
-                    ('manifest_id', 'href', 'mimetype', 'etree', 'write_back')
+                    ('manifest_id', 'OPF_href', 'mimetype', 'etree', 'write_back')
     :param yield_cm: Determines whether each iteration returns the context manager.
 
     Example::
@@ -688,7 +688,7 @@ def edit_html_batch(
         which can be used to access and operate the files in ePub.
     :param operate: Take etree object in, operate on
     :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `href`, `mimetype`), and then determine whether to 
+                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
                       continue processing.
 
     :return: Dictionary, keys are the manifest id of all processed files, values are whether 
@@ -717,10 +717,7 @@ def edit_html_batch(
     return success_status
 
 
-class IterElementInfo(namedtuple(
-    'IterElementInfo', 
-    ('global_no', 'local_no', 'element', 'etree', 'manifest_id', 'href', 'mimetype'),
-)):
+class IterElementInfo(NamedTuple):
     '''The wrapper for the output tuple, contains the following fields
 
     global_no:   the sequence number of epub (global) output
@@ -731,6 +728,13 @@ class IterElementInfo(namedtuple(
     href:        OPF href
     mimetype:    media type
     '''
+    global_no: int
+    local_no: int
+    element: _Element
+    etree: _Element
+    manifest_id: str
+    href: str
+    mimetype: str
 
 
 class EnumSelectorType(Enum):
@@ -786,7 +790,7 @@ def element_iter(
                     If its final value is `EnumSelectorType.xpath`, then parameter
                     `translator` is ignored.
     :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `href`, `mimetype`), and then determine whether to 
+                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
                       continue processing.
     :param namespaces: Prefix-namespace mappings used by `path`.
 
