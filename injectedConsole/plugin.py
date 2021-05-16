@@ -2,18 +2,87 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1, 6)
-__revision__ = 7
+__version__ = (0, 1, 7)
+__revision__ = 0
+__all__ = ['run']
+
 
 from os import chdir, path
 from pickle import dump as pickle_dump, load as pickle_load
 from sys import argv, executable
+from typing import Final, Optional, Tuple
 
 from plugin_util.encode_args import b64encode_pickle
 from plugin_util.terminal import start_terminal
 
 
-def run(bc):
+SHELLS: Final[Tuple[str]] = (
+    'python',
+    'ipython',
+    'bpython',
+    'ptpython',
+    'ptipython',
+    'qtconsole',
+    'jupyter lab',
+    'jupyter notebook',
+)
+
+
+def get_config_webui() -> dict:
+    raise NotImplementedError
+
+
+def get_config_tui() -> dict:
+    raise NotImplementedError
+
+
+def _get_config_gui(pipe=None) -> dict:
+    import tkinter
+    from tkinter import ttk
+
+    shell = 'python'
+
+    def set_shell(*args):
+        nonlocal shell
+        shell = comboxlist.get()
+
+    app = tkinter.Tk()
+    app.title('Select a shell')
+    comvalue = tkinter.StringVar()
+    comboxlist = ttk.Combobox(
+        app, textvariable=comvalue, state='readonly')
+    comboxlist["values"] = SHELLS
+    comboxlist.current(0)
+    comboxlist.bind("<<ComboboxSelected>>", set_shell)
+    comboxlist.bind("<Return>", lambda *args: app.quit())
+    comboxlist.pack()
+    app.mainloop()
+
+    config = {'shell': shell}
+    if pipe:
+        pipe.send(config)
+    return config
+
+
+def get_config_gui(new_process: bool = True) -> dict:
+    if new_process:
+        import multiprocessing
+
+        main_end, sub_end = multiprocessing.Pipe(duplex=False)
+        try:
+            p = multiprocessing.Process(
+                target=_get_config_gui, args=(sub_end,))
+            p.start()
+            p.join()
+            return main_end.recv()
+        finally:
+            main_end.close()
+            sub_end.close()
+    else:
+        return _get_config_gui()
+
+
+def run(bc) -> Optional[int]:
     laucher_file, ebook_root, outdir, _, target_file = argv
     this_plugin_dir = path.dirname(target_file)
 
@@ -24,6 +93,7 @@ def run(bc):
         ebook_root        = ebook_root,
         outdir            = outdir,
     )
+    __import__('builtins')._PATH = pathes
 
     abortfile = path.join(outdir, 'abort.exists')
     envfile = path.join(outdir, 'env.py')
@@ -58,9 +128,19 @@ print(
 ''')
 
     chdir(outdir)
-    cmd = [executable, mainfile, '--args', b64encode_pickle(pathes)]
-    # TODO: tui, gui, webui
-    start_terminal(cmd)
+
+    config = get_config_gui()
+    shell = config['shell']
+
+    if shell == 'qtconsole':
+        from plugin_help.function import start_qtconsole
+        from plugin_util.usepip import ensure_import
+
+        ensure_import('qtconsole')
+        start_qtconsole()
+    else:
+        start_terminal([executable, mainfile, '--args', 
+                        b64encode_pickle(pathes), '--shell', shell])
 
     # check whether the console is aborted.
     if path.exists(abortfile):

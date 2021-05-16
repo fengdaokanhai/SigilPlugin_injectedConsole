@@ -37,7 +37,7 @@ INDEX_URL: str = 'https://mirrors.aliyun.com/pypi/simple/'
 TRUSTED_HOST: str = 'mirrors.aliyun.com'
 
 
-def check_pip() -> bool:
+def check_pip(ensure: bool = True) -> bool:
     'Check if the `pip` package is installed.'
     try:
         # Check whether the `pip` package can be imported
@@ -53,7 +53,7 @@ def check_pip() -> bool:
             from site import USER_BASE, USER_SITE
         except ImportError:
             print('''Defective Python executable detected.
-Please replace current Python executable with another Python executable with `pip` package, 
+Please replace current Python executable with another Python executable with `pip` package 
 or replace with another Python executable which can install `pip` package 
 (the `site` module defines available `USER_BASE` and `USER_SITE`).
 
@@ -64,14 +64,11 @@ you should already have `pip`. If you installed using your OS package manager,
 `pip` may have been installed, or you can install separately by the same package manager.''')
             return False
         else:
-            if input('There is no pip installed, do you want to try to '
-                     'install pip? [y]/n ').strip() in ('', 'y', 'Y'):
-                try:
-                    install_pip()
-                except:
-                    print('Failed to install pip module')
-                    return False
-            else:
+            if not ensure:
+                return False
+            try:
+                install_pip()
+            except:
                 return False
     return True
 
@@ -176,7 +173,7 @@ def uninstall(
     package: str, 
     /, 
     *other_packages: str,
-    other_args: Iterable[str] = (),
+    other_args: Iterable[str] = ('--yes',),
 ) -> None:
     'uninstall package with pip'
     execute_pip(['uninstall', *other_args, package, *other_packages])

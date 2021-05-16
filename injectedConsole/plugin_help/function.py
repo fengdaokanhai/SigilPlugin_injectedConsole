@@ -26,10 +26,10 @@ from inputcontainer import InputContainer # type: ignore
 from outputcontainer import OutputContainer # type: ignore
 from validationcontainer import ValidationContainer # type: ignore
 
-from plugin_util.dictattr import DictAttr
 from plugin_util.colored import colored
 from plugin_util.console import start_specific_python_console
-from plugin_util.run import restart_program
+from plugin_util.dictattr import DictAttr
+from plugin_util.run import prun, restart_program
 
 
 _SYSTEM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
@@ -71,6 +71,11 @@ def load_wrapper(clear: bool = False) -> Wrapper:
         _WRAPPER.__dict__.update(wrapper.__dict__)
     return _WRAPPER
 
+try:
+    load_wrapper()
+except FileNotFoundError:
+    pass
+
 
 @contextmanager
 def _ctx_wrapper():
@@ -96,8 +101,10 @@ def get_container(wrapper=None) -> Mapping:
 
 def reload_shell(shell: str) -> None:
     'Restart the program and reload to another shell.'
-    are_u_sure = input('reload shell will discrad all local variables'
-                       ', are you sure? ([y]/n) ').strip()
+    are_u_sure = input(
+        colored('[ASK]', 'red', attrs=['bold']) + ' Reload shell will discrad all '
+        'local variables, are you sure ([y]/n)? '
+    ).strip()
     if are_u_sure not in ('', 'y', 'Y'):
         return
     argv_ = argv.copy()
@@ -152,47 +159,51 @@ def reload_embeded_shell(shell, banner='', namespace=None):
 reload_to_shell = reload_embeded_shell if _SYSTEM_IS_WINDOWS else reload_shell
 
 
+def _run_env_tips(shell=None):
+    if shell:
+        print('[TIPS] %s' % shell)
+    print('Please run the following command first in interactive shell:\n\n\t%run env\n')
+    print('在交互式命令行中，请先运行以下命令：\n\n\t%run env\n')
+
+
 def start_qtconsole(
     *args: str, 
     executable: str = executable,
-) -> None:
+) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
     with _ctx_wrapper():
-        subprocess.run([executable, '-m', 'qtconsole', *args], 
-                       check=True, shell=_SYSTEM_IS_WINDOWS)
-
-
-def _prun(args: List[str]) -> None:
-    p = subprocess.Popen(args, shell=_SYSTEM_IS_WINDOWS)
-    try:
-        while True:
-            try:
-                p.communicate(input=subprocess.PIPE) # type: ignore
-                break
-            except KeyboardInterrupt:
-                pass
-    finally:
-        p.terminate()
+        _run_env_tips('qtconsole')
+        return subprocess.run(
+            [executable, '-m', 'qtconsole', *args], 
+            check=True, shell=_SYSTEM_IS_WINDOWS)
 
 
 def start_jupyter_notebook(
     *args: str, 
     executable: str = executable,
-) -> None:
+) -> subprocess.CompletedProcess:
     'Start a jupyter notebook process, and wait until it is terminated.'
     if not args:
         args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
     with _ctx_wrapper():
-        _prun([executable, '-m', 'jupyter', 'notebook', *args])
+        _run_env_tips('jupyter notebook')
+        return prun(
+            [executable, '-m', 'jupyter', 'notebook', *args], 
+            check=True, shell=_SYSTEM_IS_WINDOWS, 
+            continue_with_exceptions=KeyboardInterrupt)
 
 
 def start_jupyter_lab(
     *args: str, 
     executable: str = executable,
-) -> None:
+) -> subprocess.CompletedProcess:
     'Start a jupyter lab process, and wait until it is terminated.'
     if not args:
         args = ('--notebook-dir="."', '--ServerApp.open_browser=True', '-y')
     with _ctx_wrapper():
-        _prun([executable, '-m', 'jupyter', 'lab', *args])
+        _run_env_tips('jupyter lab')
+        return prun(
+            [executable, '-m', 'jupyter', 'lab', *args], 
+            check=True, shell=_SYSTEM_IS_WINDOWS, 
+            continue_with_exceptions=KeyboardInterrupt)
 
