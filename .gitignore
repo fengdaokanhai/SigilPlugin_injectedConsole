@@ -41,3 +41,6 @@ __pycache__/
 *.7z
 *.rar
 
+# config file
+config.json
+

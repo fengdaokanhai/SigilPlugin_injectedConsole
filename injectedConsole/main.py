@@ -32,6 +32,7 @@ shell: str = args.shell
 if shell == 'qtconsole':
     from plugin_help.function import start_qtconsole
     ensure_import('qtconsole')
+    ensure_import('PyQt5.pyrcc', 'PyQt5')
     start_qtconsole()
 elif shell == 'jupyter notebook':
     from plugin_help.function import start_jupyter_notebook

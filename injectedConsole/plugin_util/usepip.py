@@ -41,7 +41,7 @@ def check_pip(ensure: bool = True) -> bool:
     'Check if the `pip` package is installed.'
     try:
         # Check whether the `pip` package can be imported
-        import pip
+        import pip # type: ignore
     except ImportError:
         # If the `pip` package can't be imported, there may be reasons why it can't be installed
         try:

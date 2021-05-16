@@ -3,10 +3,13 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 7)
-__revision__ = 0
+__revision__ = 2
 __all__ = ['run']
 
 
+import json
+
+from contextlib import contextmanager
 from os import chdir, path
 from pickle import dump as pickle_dump, load as pickle_load
 from sys import argv, executable
@@ -16,7 +19,9 @@ from plugin_util.encode_args import b64encode_pickle
 from plugin_util.terminal import start_terminal
 
 
-SHELLS: Final[Tuple[str]] = (
+MUDULE_DIR: Final[str] = path.dirname(path.abspath(__file__))
+CONFIG_JSON_FILE: Final[str] = path.join(MUDULE_DIR, 'config.json')
+SHELLS: Final[Tuple[str, ...]] = (
     'python',
     'ipython',
     'bpython',
@@ -36,32 +41,55 @@ def get_config_tui() -> dict:
     raise NotImplementedError
 
 
+@contextmanager
+def _ctx_conifg():
+    try:
+        config = json.load(open(CONFIG_JSON_FILE, encoding='utf-8'))
+    except (FileNotFoundError, json.JSONDecodeError):
+        config = {}
+
+    old_config = config.copy()
+
+    yield config
+
+    if old_config != config:
+        json.dump(config, open(CONFIG_JSON_FILE, 'w', encoding='utf-8'))
+
+
 def _get_config_gui(pipe=None) -> dict:
     import tkinter
     from tkinter import ttk
-
-    shell = 'python'
 
     def set_shell(*args):
         nonlocal shell
         shell = comboxlist.get()
 
-    app = tkinter.Tk()
-    app.title('Select a shell')
-    comvalue = tkinter.StringVar()
-    comboxlist = ttk.Combobox(
-        app, textvariable=comvalue, state='readonly')
-    comboxlist["values"] = SHELLS
-    comboxlist.current(0)
-    comboxlist.bind("<<ComboboxSelected>>", set_shell)
-    comboxlist.bind("<Return>", lambda *args: app.quit())
-    comboxlist.pack()
-    app.mainloop()
+    with _ctx_conifg() as old_config:
+        try:
+            shell = old_config['shell']
+            shell_idx = SHELLS.index(shell)
+        except (KeyError, ValueError):
+            shell = 'python'
+            shell_idx = 0
 
-    config = {'shell': shell}
-    if pipe:
-        pipe.send(config)
-    return config
+        app = tkinter.Tk()
+        app.title('Select a shell')
+        comvalue = tkinter.StringVar()
+        comboxlist = ttk.Combobox(
+            app, textvariable=comvalue, state='readonly')
+        comboxlist["values"] = SHELLS
+        comboxlist.current(shell_idx)
+        comboxlist.bind("<<ComboboxSelected>>", set_shell)
+        comboxlist.bind("<Return>", lambda *args: app.quit())
+        comboxlist.pack()
+        app.mainloop()
+
+        config = {'shell': shell}
+        old_config.update(config)
+
+        if pipe:
+            pipe.send(config)
+        return config
 
 
 def get_config_gui(new_process: bool = True) -> dict:
@@ -137,6 +165,7 @@ print(
         from plugin_util.usepip import ensure_import
 
         ensure_import('qtconsole')
+        ensure_import('PyQt5.pyrcc', 'PyQt5')
         start_qtconsole()
     else:
         start_terminal([executable, mainfile, '--args', 
