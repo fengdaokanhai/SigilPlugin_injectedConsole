@@ -2,20 +2,22 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 2)
+__version__ = (0, 0, 3)
 __all__ = ['restart_program', 'ctx_run', 'run', 'ctx_load', 'load', 
            'prun', 'prun_module']
 
-
+import inspect
 import re
 import subprocess
 import sys
 
 from contextlib import contextmanager
-from functools import wraps
+from functools import partial
 from os import execl, getcwd, path as _path
 from sys import argv, executable
-from typing import Any, Dict, Final, Generator, Optional, Tuple, Type, Union
+from typing import (
+    Any, Callable, Dict, Final, Generator, Optional, Tuple, Type, Union
+)
 from types import CodeType, ModuleType
 from urllib.parse import unquote
 from urllib.request import urlopen
@@ -24,6 +26,7 @@ from .temporary import temp_wdir, temp_sys_modules
 
 
 _PLATFORM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
+_VOID = object()
 
 
 def _startswith_protocol(
@@ -35,6 +38,30 @@ def _startswith_protocol(
         return _creb.match(path) is not None
     else:
         return _cre.match(path) is not None
+
+
+def _update_signature(
+    standard_unit: Callable, 
+    machining_unit: Optional[Callable] = None, 
+    return_annotation=_VOID,
+):
+    if machining_unit is None:
+        return partial(
+            _update_signature, 
+            standard_unit, 
+            return_annotation=return_annotation, 
+        )
+    sig: inspect.Signature = inspect.signature(standard_unit)
+    if return_annotation is not _VOID:
+        sig = sig.replace(return_annotation=return_annotation)
+    machining_unit.__signature__ = sig # type: ignore
+
+    machining_unit.__doc__ = standard_unit.__doc__
+    machining_unit.__annotations__ = {
+        **standard_unit.__annotations__, 
+        'run': return_annotation, 
+    }
+    return machining_unit
 
 
 def restart_program(argv=argv):
@@ -61,6 +88,8 @@ def ctx_run(
     :param mainfile: If the `path` is a directory, according to this parameter, 
                      an existing main file will be used.
     :param clean_sys_modules: Determine whether to restore `sys.modules` at the beginning.
+        If `clean_sys_modules` is True, it will retain built-in modules and standard libraries and 
+        site-packages modules / packages, but clear namespace packages and any other modules / packages.
     :param restore_sys_modules: Determine whether to restore `sys.modules` at the end.
 
     :return: Dictionary of script execution results.
@@ -138,12 +167,10 @@ def ctx_run(
     )
 
 
-@wraps(ctx_run)
+@_update_signature(ctx_run, return_annotation=Dict[str, Any])
 def run(*args, **kwargs):
     with ctx_run(*args, **kwargs) as d:
         return d
-
-run.__annotations__['return'] = Dict[str, Any]
 
 
 @contextmanager
@@ -179,12 +206,10 @@ def ctx_load(
         yield mod
 
 
-@wraps(ctx_load)
+@_update_signature(ctx_load, return_annotation=ModuleType)
 def load(*args, **kwargs):
     with ctx_load(*args, **kwargs) as mod:
         return mod
-
-load.__annotations__['return'] = ModuleType
 
 
 def prun(

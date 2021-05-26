@@ -2,7 +2,7 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 2)
+__version__ = (0, 0, 3)
 __all__ = [
     'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 
     'reload_shell', 'back_shell', 'reload_embeded_shell', 'reload_to_shell', 
@@ -17,7 +17,8 @@ from contextlib import contextmanager
 from os import _exit, path
 from pickle import load as pickle_load, dump as pickle_dump
 from sys import _getframe, argv, executable
-from typing import Final, List, Mapping, Optional
+from tempfile import NamedTemporaryFile
+from typing import cast, Final, List, Mapping, Optional
 
 from wrapper import Wrapper # type: ignore
 from bookcontainer import BookContainer # type: ignore
@@ -160,21 +161,53 @@ reload_to_shell = reload_embeded_shell if _SYSTEM_IS_WINDOWS else reload_shell
 
 def run_plugin(
     file_or_dir: str, 
-    bk: Optional[BookContainer] = None,
-):
-    'Running a Sigil plug-in'
-    # TODO: Run in child process
-    if bk is None:
-        bk = _getframe(1).f_globals['bk']
+    bc: Optional[BookContainer] = None,
+    run_in_process: bool = False,
+) -> None:
+    '''Running a Sigil plug-in
 
-    file: str
-    if path.isdir(file_or_dir):
-        file = path.join(file_or_dir, 'plugin.py')
+    :param file_or_dir: Path of Sigil plug-in folder or script file.
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    :param run_in_process: Determine whether to run the program in a child process.
+    '''
+    if run_in_process:
+        with NamedTemporaryFile(suffix='.py', mode='w') as f:
+            f.write(
+f'''#!/usr/bin/env python3
+# coding: utf-8
+
+exec(open({_ENVFILE!r}, encoding='utf-8').read(), globals())
+
+try:
+    retcode = plugin.run_plugin({file_or_dir!r}, bc)
+    if type(retcode) is not int:
+        retcode = 0
+except BaseException:
+    retcode = -1
+
+if retcode == 0:
+    plugin.dump_wrapper()
+else:
+    __import__('os')._exit(retcode)
+''')
+            f.flush()
+            dump_wrapper()
+            subprocess.run(
+                [executable, f.name], 
+                check=True, shell=_SYSTEM_IS_WINDOWS)
+            load_wrapper()
     else:
-        file = file_or_dir
+        if bc is None:
+            bc = cast(BookContainer, _getframe(1).f_globals['bc'])
 
-    with ctx_run(file, {'bk': bk}) as info:
-        return info['namespace']['run'](bk)
+        file: str = path.join(file_or_dir, 'plugin.py') \
+                    if path.isdir(file_or_dir) else file_or_dir
+
+        with ctx_run(file, {'bc': bc, 'bk': bc}) as info:
+            return info['namespace']['run'](bc)
 
 
 def _run_env_tips(shell=None):

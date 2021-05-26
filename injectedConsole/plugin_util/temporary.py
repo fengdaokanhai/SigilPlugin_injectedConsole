@@ -2,7 +2,7 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 2)
+__version__ = (0, 0, 3)
 
 import os, sys
 
@@ -49,7 +49,17 @@ def temp_sys_modules(
     sys_modules: Dict[str, ModuleType] = sys.modules
     original_sys_modules: Dict[str, ModuleType] = sys_modules.copy()
     if clean:
+        prefixes = tuple(set(__import__('site').PREFIXES))
+        # Only retaining built-in modules and standard libraries and site-packages modules, 
+        # but ignoring namespace packages (the documentation is as follows)
+        # [Packaging namespace packages](https://packaging.python.org/guides/packaging-namespace-packages/)
         sys_modules.clear()
+        sys_modules.update(
+            (k, m) for k, m in original_sys_modules.items() 
+            if not hasattr(m, '__file__') # It means a built-in module
+                or m.__file__ is not None # It means not a namespace package
+                and m.__file__.startswith(prefixes) # It means a standard library or site-packages module
+        )
 
     sys_path: List[str]
     with temp_sys_path() as sys_path:
@@ -60,7 +70,6 @@ def temp_sys_modules(
             yield sys_modules
         finally:
             if restore:
-                if not clean:
-                    sys_modules.clear()
+                sys_modules.clear()
                 sys_modules.update(original_sys_modules)
 

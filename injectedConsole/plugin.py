@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 7)
-__revision__ = 3
+__revision__ = 4
 __all__ = ['run']
 
 
@@ -132,7 +132,10 @@ def run(bc) -> Optional[int]:
     pickle_dump(bc._w, open(pklfile, 'wb'))
 
     open(envfile, 'w', encoding='utf-8').write(
-f'''# Injecting builtins variable: _PATH
+f'''#!/usr/bin/env python3
+# coding: utf-8
+
+# Injecting builtins variable: _PATH
 __import__('builtins')._PATH = {pathes!r}
 
 # Injecting module pathes
