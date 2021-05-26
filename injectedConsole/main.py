@@ -29,7 +29,11 @@ __import__('sys').path.insert(0, _PATH['sigil_package_dir'])
 
 
 shell: str = args.shell
-if shell == 'qtconsole':
+if shell == 'nbterm':
+    from plugin_help.function import start_nbterm
+    ensure_import('nbterm')
+    start_nbterm()
+elif shell == 'qtconsole':
     from plugin_help.function import start_qtconsole
     ensure_import('qtconsole')
     ensure_import('PyQt5.pyrcc', 'PyQt5')

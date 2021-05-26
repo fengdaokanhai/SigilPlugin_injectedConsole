@@ -29,14 +29,32 @@ TODO: to be continued...
 - [pyquery](https://pypi.org/project/pyquery/)
 - [beautifulsoup4](https://pypi.org/project/beautifulsoup4/)
 - [parsel](https://pypi.org/project/parsel/)
-- [cssselect](https://pypi.org/project/cssselect/)
 - [cssselect2](https://pypi.org/project/cssselect2/)
+- [cssselect](https://pypi.org/project/cssselect/)
+
+#### Text
+- [flashtext](https://pypi.org/project/flashtext/)
 
 #### CSS
 - [cssutils](https://pypi.org/project/cssutils/)
-- [tinycss](https://pypi.org/project/tinycss/)
 - [tinycss2](https://pypi.org/project/tinycss2/)
+- [tinycss](https://pypi.org/project/tinycss/)
 
 #### Font
 - [fonttools](https://pypi.org/project/fonttools/)
+
+#### Translation
+- [OpenCC](https://pypi.org/project/OpenCC/)
+
+#### GUI
+- [PyQt5](https://pypi.org/project/PyQt5/)
+- [PyQt4](https://pypi.org/project/PyQt4/)
+- [PySide2](https://pypi.org/project/PySide2/)
+- [PySide](https://pypi.org/project/PySide/)
+- [PyAutoGUI](https://pypi.org/project/PyAutoGUI/)
+
+#### Debug
+- [pytest](https://pypi.org/project/pytest/)
+- [nose2](https://pypi.org/project/nose2/)
+- [birdseye](https://pypi.org/project/birdseye/)
 

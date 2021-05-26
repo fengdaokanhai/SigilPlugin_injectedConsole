@@ -4,24 +4,28 @@ This module provides some functions for modifying files in the
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 9)
+__version__ = (0, 0, 10)
 __all__ = [
     'WriteBack', 'DoNotWriteBack', 'make_element','make_html_element', 
     'xml_fromstring', 'xml_tostring', 'html_fromstring', 'html_tostring', 
     'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
     'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 
-    'EnumSelectorType', 'element_iter', 
+    'EnumSelectorType', 'element_iter', 'EditStack', 'TextEtreeEditStack', 
 ]
 
-from contextlib import contextmanager
+import sys
+
+from contextlib import contextmanager, ExitStack
 from enum import Enum
 from functools import partial
 from inspect import getfullargspec, CO_VARARGS
 from platform import system
 from typing import (
     cast, Any, Callable, ContextManager, Dict, Generator, 
-    Iterable, List, Mapping, NamedTuple, Optional, Tuple, Union, 
+    Iterable, Iterator, List, Mapping, NamedTuple, Optional, 
+    Tuple, TypeVar, Union, 
 )
+from types import MappingProxyType
 
 from cssselect.xpath import GenericTranslator # type: ignore
 from lxml.cssselect import CSSSelector # type: ignore
@@ -34,6 +38,10 @@ from lxml.html import ( # type: ignore
     Element as HTMLElement, HtmlElement, HTMLParser, 
 )
 
+from bookcontainer import BookContainer # type: ignore
+
+
+T = TypeVar('T')
 
 _PLATFORM_IS_WINDOWS = system() == 'Windows'
 _HTML_DOCTYPE = b'<!DOCTYPE html>'
@@ -290,7 +298,7 @@ def html_tostring(
 
 
 def edit(
-    bc,
+    bc: BookContainer,
     manifest_id: str,
     operate: Callable[..., Union[bytes, str]],
 ) -> bool:
@@ -323,7 +331,7 @@ def edit(
 
 @contextmanager
 def ctx_edit(
-    bc, 
+    bc: BookContainer, 
     manifest_id: str,
     wrap_me: bool = False,
     extra_data: Optional[Mapping] = None,
@@ -402,7 +410,7 @@ def ctx_edit(
 
 @contextmanager
 def ctx_edit_sgml(
-    bc, 
+    bc: BookContainer, 
     manifest_id: str,
     fromstring: Callable = xml_fromstring,
     tostring: Callable[..., Union[bytes, bytearray, str]] = xml_tostring,
@@ -454,7 +462,7 @@ def ctx_edit_sgml(
 
 @contextmanager
 def ctx_edit_html(
-    bc, 
+    bc: BookContainer, 
     manifest_id: str,
 ) -> Generator[Any, Any, bool]:
     '''Read and yield the etree object (parsed from a html file), 
@@ -486,7 +494,7 @@ def ctx_edit_html(
 
 
 def edit_iter(
-    bc, 
+    bc: BookContainer, 
     manifest_id_s: Optional[Iterable[str]] = None,
     predicate: Optional[Callable[..., bool]] = None,
     wrap_me: bool = False,
@@ -553,7 +561,7 @@ def edit_iter(
 
 
 def edit_batch(
-    bc, 
+    bc: BookContainer, 
     operate: Callable,
     manifest_id_s: Optional[Iterable[str]] = None,
     predicate: Optional[Callable[..., bool]] = None,
@@ -605,7 +613,7 @@ def edit_batch(
 
 
 def edit_html_iter(
-    bc,
+    bc: BookContainer,
     predicate: Optional[Callable[..., bool]] = None,
     wrap_me: bool = False,
     yield_cm: bool = False,
@@ -677,7 +685,7 @@ def edit_html_iter(
 
 
 def edit_html_batch(
-    bc, 
+    bc: BookContainer, 
     operate: Callable[[_Element], Any],
     predicate: Optional[Callable[..., bool]] = None,
 ) -> Dict[str, bool]:
@@ -766,7 +774,7 @@ class EnumSelectorType(Enum):
 
 
 def element_iter(
-    bc, 
+    bc: BookContainer, 
     path: Union[str, XPath], 
     seltype: Union[int, str, EnumSelectorType] = EnumSelectorType.cssselect, 
     namespaces: Optional[Mapping] = None, 
@@ -850,4 +858,90 @@ def element_iter(
                     i, j, el, tree, data['manifest_id'], data['href'], data['mimetype'])
         else:
             yield from els
+
+
+class EditStack(Mapping[str, T]):
+
+    __context_factory__: Callable[[BookContainer, str], ContextManager] = \
+        lambda bc, fid: ctx_edit(bc, fid, wrap_me=True)
+
+    def __init__(self, bc: BookContainer) -> None:
+        self._edit_stack: ExitStack = ExitStack()
+        self._data: Dict[str, T] = {}
+        self._bk = self._bc = bc
+
+    @property
+    def data(self) -> MappingProxyType:
+        return MappingProxyType(self._data)
+
+    def __len__(self) -> int:
+        return len(self._bc._w.id_to_mime)
+
+    def __iter__(self) -> Iterator[str]:
+        for fid, *_ in self._bc.manifest_iter():
+            yield fid
+
+    def iteritems(self) -> Iterator[Tuple[str, T]]:
+        for fid in self:
+            yield fid, self[fid]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._data.clear()
+        self._edit_stack.__exit__(*exc_info)
+
+    def clear(self) -> None:
+        self.__exit__(*sys.exc_info())
+
+    __del__ = clear
+
+    def __getitem__(self, fid) -> T:
+        d = self._data
+        if fid not in d:
+            try:
+                d[fid] = self._edit_stack.enter_context(
+                    type(self).__context_factory__(self._bc, fid))
+            except Exception as exc:
+                raise KeyError(fid) from exc
+        return d[fid]
+
+    def read_id(self, key) -> T:
+        '''Receive a file's manifest id, return the contents of the file, 
+        otherwise raise KeyError'''
+        return self[key]
+
+    def read_href(self, key) -> T:
+        '''Receive a file's OPF href, return the contents of the file, 
+        otherwise raise KeyError'''
+        try:
+            return self[self._bc.href_to_id(key)]
+        except Exception as exc:
+            raise KeyError(key) from exc
+
+    def read_basename(self, key) -> T:
+        '''Receive a file's basename (with extension), return the contents of the file, 
+        otherwise raise KeyError'''
+        try:
+            return self[self._bc.basename_to_id(key)]
+        except Exception as exc:
+            raise KeyError(key) from exc
+
+    def read_bookpath(self, key) -> T:
+        '''Receive a file's bookpath (aka 'book_href' aka 'bookhref'), 
+        return the contents of the file, otherwise raise KeyError'''
+        try:
+            return self[self._bc.bookpath_to_id(key)]
+        except Exception as exc:
+            raise KeyError(key) from exc
+
+
+class TextEtreeEditStack(EditStack[T]):
+
+    __context_factory__ = ctx_edit_html
+
+    def __iter__(self) -> Iterator[str]:
+        for fid, *_ in self._bc.text_iter():
+            yield fid
 

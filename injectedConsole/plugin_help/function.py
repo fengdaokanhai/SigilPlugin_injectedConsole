@@ -5,8 +5,8 @@ __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 2)
 __all__ = [
     'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 
-    'reload_shell', 'back_shell', 'reload_embeded_shell', 
-    'reload_to_shell', 'start_qtconsole', 'start_jupyter_notebook', 
+    'reload_shell', 'back_shell', 'reload_embeded_shell', 'reload_to_shell', 
+    'run_plugin', 'start_nbterm', 'start_qtconsole', 'start_jupyter_notebook', 
     'start_jupyter_lab', 
 ]
 
@@ -14,8 +14,7 @@ __all__ = [
 import subprocess
 
 from contextlib import contextmanager
-from os import _exit
-from os.path import join as path_join
+from os import _exit, path
 from pickle import load as pickle_load, dump as pickle_dump
 from sys import _getframe, argv, executable
 from typing import Final, List, Mapping, Optional
@@ -29,15 +28,15 @@ from validationcontainer import ValidationContainer # type: ignore
 from plugin_util.colored import colored
 from plugin_util.console import start_specific_python_console
 from plugin_util.dictattr import DictAttr
-from plugin_util.run import prun, restart_program
+from plugin_util.run import ctx_run, prun_module, restart_program
 
 
 _SYSTEM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
 _PATH: Final[Mapping] = __import__('builtins')._PATH
 _OUTDIR: Final[str] = _PATH['outdir']
-_ABORTFILE: Final[str] = path_join(_OUTDIR, 'abort.exists')
-_ENVFILE: Final[str] = path_join(_OUTDIR, 'env.py')
-_PKLFILE: Final[str] = path_join(_OUTDIR, 'wrapper.pkl')
+_ABORTFILE: Final[str] = path.join(_OUTDIR, 'abort.exists')
+_ENVFILE: Final[str] = path.join(_OUTDIR, 'env.py')
+_PKLFILE: Final[str] = path.join(_OUTDIR, 'wrapper.pkl')
 _WRAPPER: Optional[Wrapper] = None
 
 
@@ -159,6 +158,25 @@ def reload_embeded_shell(shell, banner='', namespace=None):
 reload_to_shell = reload_embeded_shell if _SYSTEM_IS_WINDOWS else reload_shell
 
 
+def run_plugin(
+    file_or_dir: str, 
+    bk: Optional[BookContainer] = None,
+):
+    'Running a Sigil plug-in'
+    # TODO: Run in child process
+    if bk is None:
+        bk = _getframe(1).f_globals['bk']
+
+    file: str
+    if path.isdir(file_or_dir):
+        file = path.join(file_or_dir, 'plugin.py')
+    else:
+        file = file_or_dir
+
+    with ctx_run(file, {'bk': bk}) as info:
+        return info['namespace']['run'](bk)
+
+
 def _run_env_tips(shell=None):
     if shell:
         print('[TIPS] %s' % shell)
@@ -166,11 +184,27 @@ def _run_env_tips(shell=None):
     print('在交互式命令行中，请先运行以下命令：\n\n\t%run env\n')
 
 
+def start_nbterm(
+    *args: str, 
+    executable: str = executable,
+) -> subprocess.CompletedProcess:
+    'Start a qtconsole process, and wait until it is terminated.'
+    if not args:
+        args = (':RUN FIRST: %run env',)
+    with _ctx_wrapper():
+        _run_env_tips('nbterm')
+        return subprocess.run(
+            [executable, '-m', 'nbterm.nbterm', *args], 
+            check=True, shell=_SYSTEM_IS_WINDOWS)
+
+
 def start_qtconsole(
     *args: str, 
     executable: str = executable,
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
+    if not args:
+        args = ("--FrontendWidget.banner=':RUN FIRST: %run env 😊 '",)
     with _ctx_wrapper():
         _run_env_tips('qtconsole')
         return subprocess.run(
@@ -187,10 +221,7 @@ def start_jupyter_notebook(
         args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter notebook')
-        return prun(
-            [executable, '-m', 'jupyter', 'notebook', *args], 
-            check=True, shell=_SYSTEM_IS_WINDOWS, 
-            continue_with_exceptions=KeyboardInterrupt)
+        return prun_module('jupyter', 'notebook', *args)
 
 
 def start_jupyter_lab(
@@ -202,8 +233,5 @@ def start_jupyter_lab(
         args = ('--notebook-dir="."', '--ServerApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter lab')
-        return prun(
-            [executable, '-m', 'jupyter', 'lab', *args], 
-            check=True, shell=_SYSTEM_IS_WINDOWS, 
-            continue_with_exceptions=KeyboardInterrupt)
+        return prun_module('jupyter', 'lab', *args)
 

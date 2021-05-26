@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 7)
-__revision__ = 2
+__revision__ = 3
 __all__ = ['run']
 
 
@@ -27,6 +27,7 @@ SHELLS: Final[Tuple[str, ...]] = (
     'bpython',
     'ptpython',
     'ptipython',
+    'nbterm',
     'qtconsole',
     'jupyter lab',
     'jupyter notebook',

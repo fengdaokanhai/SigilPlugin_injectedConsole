@@ -2,22 +2,28 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
-__all__ = ['restart_program', 'run', 'load', 'prun']
+__version__ = (0, 0, 2)
+__all__ = ['restart_program', 'ctx_run', 'run', 'ctx_load', 'load', 
+           'prun', 'prun_module']
 
 
 import re
 import subprocess
 import sys
 
+from contextlib import contextmanager
+from functools import wraps
 from os import execl, getcwd, path as _path
 from sys import argv, executable
-from typing import Any, Dict, Optional, Tuple, Type, Union
+from typing import Any, Dict, Final, Generator, Optional, Tuple, Type, Union
 from types import CodeType, ModuleType
 from urllib.parse import unquote
 from urllib.request import urlopen
 
 from .temporary import temp_wdir, temp_sys_modules
+
+
+_PLATFORM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
 
 
 def _startswith_protocol(
@@ -36,12 +42,15 @@ def restart_program(argv=argv):
     execl(executable, executable, *argv)
 
 
-def run(
+@contextmanager
+def ctx_run(
     path: str, 
     namespace: Optional[dict] = None, 
     wdir: Optional[str] = None, 
     mainfile: Union[str, Tuple[str, ...]] = ('__main__.py', 'main.py', '__init__.py'),
-) -> Dict[str, Any]:
+    clean_sys_modules: bool = True,
+    restore_sys_modules: bool = True,
+) -> Generator[Dict[str, Any], None, None]:
     '''Run a [file] / [mainfile in directory], from a [file] | [url] | [directory].
 
     :param path: The path of file or directory of the python script.
@@ -51,8 +60,18 @@ def run(
                  then use the current working directory.
     :param mainfile: If the `path` is a directory, according to this parameter, 
                      an existing main file will be used.
+    :param clean_sys_modules: Determine whether to restore `sys.modules` at the beginning.
+    :param restore_sys_modules: Determine whether to restore `sys.modules` at the end.
 
     :return: Dictionary of script execution results.
+
+    Reference:
+        - [How to Run Your Python Scripts](https://realpython.com/run-python-scripts/)
+
+    Tips: You can also use other functions as following
+        - [runpy.run_path](https://docs.python.org/3/library/runpy.html#runpy.run_path)
+        - [importlib.import_module](https://docs.python.org/3/library/importlib.html#importlib.import_module)
+        - [spyder runfile](https://github.com/spyder-ide/spyder-kernels/blob/master/spyder_kernels/customize/spydercustomize.py#L486)
     '''
     # If you want to run as main module, set namespace['__name__'] = '__main__'
     # TODO: run a .zip or .egg file
@@ -88,7 +107,7 @@ def run(
             module_name = _path.splitext(_path.basename(path))[0]
             package_name = ''
 
-        source = open(file_).read()
+        source = open(file_, encoding='utf-8').read()
 
     if namespace is None:
         namespace = {'__name__': module_name}
@@ -98,7 +117,11 @@ def run(
     namespace['__file__'] = file_
     namespace['__package__'] = package_name
 
-    with temp_sys_modules(mdir):
+    with temp_sys_modules(
+        mdir, 
+        clean=clean_sys_modules, 
+        restore=restore_sys_modules, 
+    ):
         code: CodeType = compile(source, path, 'exec')
         if wdir == getcwd():
             exec(code, namespace)
@@ -106,15 +129,30 @@ def run(
             with temp_wdir(wdir):
                 exec(code, namespace)
 
-    return dict(path=path, code=code, namespace=namespace)
+    yield dict(
+        namespace=namespace,
+        path=path, 
+        code=code, 
+        sys_path=sys.path.copy(),
+        sys_modules=sys.modules.copy(),
+    )
 
 
-def load(
+@wraps(ctx_run)
+def run(*args, **kwargs):
+    with ctx_run(*args, **kwargs) as d:
+        return d
+
+run.__annotations__['return'] = Dict[str, Any]
+
+
+@contextmanager
+def ctx_load(
     path: str, 
     wdir: Optional[str] = None,
     mainfile: Union[str, Tuple[str, ...]] = '__init__.py',
     as_sys_module: bool = False,
-) -> ModuleType:
+) -> Generator[ModuleType, None, None]:
     '''Load a [module] | [package], from a [file] | [directory] | [url].
 
     :param path: The path of file or directory of the python script.
@@ -128,12 +166,25 @@ def load(
     '''
     # TODO: load a .zip or .egg file
     mod: ModuleType = ModuleType('')
-    info: Dict[str, Any] = run(path, mod.__dict__, wdir=wdir, mainfile=mainfile)
+    info: Dict[str, Any]
+    with ctx_run(
+        path, mod.__dict__, 
+        wdir=wdir, 
+        mainfile=mainfile, 
+        clean_sys_modules=not as_sys_module,
+        restore_sys_modules=not as_sys_module,
+    ) as info:
+        if as_sys_module:
+            sys.modules[info['path']] = mod
+        yield mod
 
-    if as_sys_module:
-        sys.modules[info['path']] = mod
 
-    return mod
+@wraps(ctx_load)
+def load(*args, **kwargs):
+    with ctx_load(*args, **kwargs) as mod:
+        return mod
+
+load.__annotations__['return'] = ModuleType
 
 
 def prun(
@@ -219,4 +270,19 @@ def prun(
             raise subprocess.CalledProcessError(
                 retcode, process.args, output=stdout, stderr=stderr)
     return subprocess.CompletedProcess(process.args, retcode, stdout, stderr) # type: ignore
+
+
+def prun_module(
+    mod: str, 
+    *args: str,
+    executable: str = executable,
+    continue_with_exceptions=KeyboardInterrupt,
+    check: bool = True,
+    shell=_PLATFORM_IS_WINDOWS,
+    **kwds,
+) -> subprocess.CompletedProcess:
+    'Run library module as a script with `prun` function.'
+    return prun([executable, '-m', mod, *args], 
+                continue_with_exceptions=continue_with_exceptions, 
+                check=check, shell=shell, **kwds)
 

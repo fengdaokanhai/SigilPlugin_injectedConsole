@@ -2,12 +2,13 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
+__version__ = (0, 0, 2)
 
 import os, sys
 
 from contextlib import contextmanager
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
+from types import ModuleType
 
 
 __all__ = ['temp_wdir', 'temp_sys_path', 'temp_sys_modules']
@@ -28,35 +29,38 @@ def temp_wdir(wdir: PathType):
 
 
 @contextmanager
-def temp_sys_path(copy: bool = False):
+def temp_sys_path():
     'Temporary sys.path'
-    original_sys_path: list = sys.path
-    sys.path = sys.path.copy() if copy else []
+    sys_path: List[str] = sys.path
+    original_sys_path: List[str] = sys_path.copy()
     try:
-        yield sys.modules
+        yield sys_path
     finally:
-        sys.path = original_sys_path
+        sys_path[:] = original_sys_path
 
 
 @contextmanager
 def temp_sys_modules(
     mdir: Optional[PathType] = None, 
-    copy: bool = False,
-    clean_path_by_remove: bool = False,
+    clean: bool = True, 
+    restore: bool = True, 
 ):
     'Temporary sys.modules'
-    original_sys_modules: dict = sys.modules
-    sys.modules = sys.modules.copy() if copy else {}
-    try:
+    sys_modules: Dict[str, ModuleType] = sys.modules
+    original_sys_modules: Dict[str, ModuleType] = sys_modules.copy()
+    if clean:
+        sys_modules.clear()
+
+    sys_path: List[str]
+    with temp_sys_path() as sys_path:
         if mdir is not None:
             mdir_: str = mdir.decode() if isinstance(mdir, bytes) else str(mdir)
-            sys.path.insert(0, mdir_)
-        yield sys.modules
-    finally:
-        sys.modules = original_sys_modules
-        if mdir is not None:
-            if clean_path_by_remove:
-                sys.path.remove(mdir_)
-            else:
-                del sys.path[0]
+            sys_path.insert(0, mdir_)
+        try:
+            yield sys_modules
+        finally:
+            if restore:
+                if not clean:
+                    sys_modules.clear()
+                sys_modules.update(original_sys_modules)
 
