@@ -3,16 +3,15 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 7)
-__revision__ = 4
+__revision__ = 5
 __all__ = ['run']
 
 
 import json
+import sys
 
 from contextlib import contextmanager
-from os import chdir, path
-from pickle import dump as pickle_dump, load as pickle_load
-from sys import argv, executable
+from os import chdir, path, remove, symlink
 from typing import Final, Optional, Tuple
 
 from plugin_util.encode_args import b64encode_pickle
@@ -29,9 +28,20 @@ SHELLS: Final[Tuple[str, ...]] = (
     'ptipython',
     'nbterm',
     'qtconsole',
+    'spyder',
     'jupyter lab',
     'jupyter notebook',
 )
+
+
+def _rm(path) -> bool:
+    try:
+        remove(path)
+        return True
+    except FileNotFoundError:
+        return True
+    except BaseException:
+        return False
 
 
 def get_config_webui() -> dict:
@@ -112,72 +122,95 @@ def get_config_gui(new_process: bool = True) -> dict:
 
 
 def run(bc) -> Optional[int]:
-    laucher_file, ebook_root, outdir, _, target_file = argv
+    laucher_file, ebook_root, outdir, _, target_file = sys.argv
     this_plugin_dir = path.dirname(target_file)
+    sigil_package_dir = path.dirname(laucher_file)
 
     pathes = dict(
-        sigil_package_dir = path.dirname(laucher_file),
+        laucher_file      = laucher_file,
+        sigil_package_dir = sigil_package_dir,
         this_plugin_dir   = this_plugin_dir,
         plugins_dir       = path.dirname(this_plugin_dir),
         ebook_root        = ebook_root,
         outdir            = outdir,
     )
-    __import__('builtins')._PATH = pathes
+    __import__('builtins')._injectedConsole_PATH = pathes
 
     abortfile = path.join(outdir, 'abort.exists')
     envfile = path.join(outdir, 'env.py')
+    envfile_link = path.join(path.expanduser('~'), 'env.py')
     mainfile = path.join(this_plugin_dir, 'main.py')
-    pklfile = path.join(outdir, 'wrapper.pkl')
 
-    pickle_dump(bc._w, open(pklfile, 'wb'))
+    from plugin_help import function
+
+    function._WRAPPER = bc._w
+    function.dump_wrapper(bc._w)
 
     open(envfile, 'w', encoding='utf-8').write(
 f'''#!/usr/bin/env python3
 # coding: utf-8
+import builtins as __builtins
 
-# Injecting builtins variable: _PATH
-__import__('builtins')._PATH = {pathes!r}
+if getattr(__builtins, '_injectedConsole_RUNPY', False):
+    print("""
+    🦶🦶🦶 Environment had been loaded, ignoring
+    🏃🏃🏃 环境早已被加载，忽略
+""")
+else:
+    # Injecting builtins variable: _injectedConsole_PATH
+    __builtins._injectedConsole_PATH = {pathes!r}
 
-# Injecting module pathes
-__sys_path = __import__('sys').path
-__sys_path.insert(0, {pathes['this_plugin_dir']!r})
-__sys_path.insert(0, {pathes['sigil_package_dir']!r})
-del __sys_path
+    # Injecting module pathes
+    __sys_path = __import__('sys').path
+    __sys_path.insert(0, r'{this_plugin_dir}')
+    __sys_path.insert(0, r'{sigil_package_dir}')
+    del __sys_path
 
-# Introducing global variables
-import plugin_help as plugin
-w = wrapper = plugin.load_wrapper()
-container = plugin.get_container(wrapper)
-bc = bk = bookcontainer = container.edit
+    __import__('os').chdir(r'{outdir}')
 
-# Callback at exit
-__import__('atexit').register(plugin.dump_wrapper)
+    # Introducing global variables
+    import plugin_help as plugin
+    w = wrapper = plugin.function._WRAPPER
+    container = plugin.get_container(wrapper)
+    bc = bk = bookcontainer = container.edit
 
-# Execution success information
-print(
-"""🎉🎉🎉 Environment loaded successfully
-🎆🎆🎆 成功加载环境""")
+    # Callback at exit
+    __import__('atexit').register(plugin.dump_wrapper)
+
+    # Execution success information
+    print("""
+    🎉🎉🎉 Environment loaded successfully
+    🎆🎆🎆 成功加载环境
+""")
+    __builtins._injectedConsole_RUNPY = True
+
+del __builtins
 ''')
+
+    _rm(envfile_link)
+    symlink(envfile, envfile_link)
 
     chdir(outdir)
 
     config = get_config_gui()
     shell = config['shell']
 
-    if shell == 'qtconsole':
-        from plugin_help.function import start_qtconsole
-        from plugin_util.usepip import ensure_import
-
-        ensure_import('qtconsole')
-        ensure_import('PyQt5.pyrcc', 'PyQt5')
-        start_qtconsole()
-    else:
-        start_terminal([executable, mainfile, '--args', 
-                        b64encode_pickle(pathes), '--shell', shell])
+    try:
+        if shell == 'qtconsole':
+            function.start_qtconsole()
+        elif shell == 'spyder':
+            function.start_spyder()
+        else:
+            start_terminal([sys.executable, mainfile, '--args', 
+                            b64encode_pickle(pathes), '--shell', shell])
+    finally:
+        _rm(envfile_link)
 
     # check whether the console is aborted.
     if path.exists(abortfile):
         return 1
-    bc._w = pickle_load(open(pklfile, 'rb'))
+
+    function.load_wrapper()
+
     return 0
 

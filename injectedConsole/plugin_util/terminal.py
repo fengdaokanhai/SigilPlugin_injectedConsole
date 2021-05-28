@@ -159,7 +159,11 @@ def start_linux_terminal(
     if app_args is None:
         # SUPPOSE: All apps except xterm have the -x(--execute) parameter 
         #          to execute the command.
-        if not app.endswith('xterm'):
+        app_name = app.rsplit('/', 1)[-1]
+        if app_name == 'gnome-terminal':
+            split_command.append('--wait')
+            split_command.append('--')
+        elif not app_name.endswith('xterm'):
             split_command.append('-x')
     else:
         split_command.extend(app_args)

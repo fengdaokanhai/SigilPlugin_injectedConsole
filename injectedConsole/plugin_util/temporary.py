@@ -7,14 +7,44 @@ __version__ = (0, 0, 3)
 import os, sys
 
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 from types import ModuleType
 
 
-__all__ = ['temp_wdir', 'temp_sys_path', 'temp_sys_modules']
+__all__ = ['temp_dict', 'temp_list', 'temp_set', 'temp_wdir', 
+           'temp_sys_path', 'temp_sys_modules']
 
 
 PathType = Union[str, bytes, os.PathLike]
+
+
+@contextmanager
+def temp_dict(container: dict, /):
+    original = container.copy()
+    try:
+        yield container
+    finally:
+        container.clear()
+        container.update(original)
+
+
+@contextmanager
+def temp_list(container: list, /):
+    original = container.copy()
+    try:
+        yield container
+    finally:
+        container[:] = original
+
+
+@contextmanager
+def temp_set(container: set, /):
+    original = container.copy()
+    try:
+        yield container
+    finally:
+        container.clear()
+        container.update(original)
 
 
 @contextmanager
@@ -31,12 +61,7 @@ def temp_wdir(wdir: PathType):
 @contextmanager
 def temp_sys_path():
     'Temporary sys.path'
-    sys_path: List[str] = sys.path
-    original_sys_path: List[str] = sys_path.copy()
-    try:
-        yield sys_path
-    finally:
-        sys_path[:] = original_sys_path
+    yield from temp_list.__wrapped__(sys.path)
 
 
 @contextmanager
@@ -44,13 +69,14 @@ def temp_sys_modules(
     mdir: Optional[PathType] = None, 
     clean: bool = True, 
     restore: bool = True, 
+    prefixes_not_clean: Tuple[str, ...] = tuple(set(__import__('site').PREFIXES)),
 ):
     'Temporary sys.modules'
     sys_modules: Dict[str, ModuleType] = sys.modules
     original_sys_modules: Dict[str, ModuleType] = sys_modules.copy()
     if clean:
-        prefixes = tuple(set(__import__('site').PREFIXES))
-        # Only retaining built-in modules and standard libraries and site-packages modules, 
+        # Only retaining built-in modules and standard libraries and site-packages modules 
+        # (`prefixes_not_clean` as the path prefix), 
         # but ignoring namespace packages (the documentation is as follows)
         # [Packaging namespace packages](https://packaging.python.org/guides/packaging-namespace-packages/)
         sys_modules.clear()
@@ -58,7 +84,7 @@ def temp_sys_modules(
             (k, m) for k, m in original_sys_modules.items() 
             if not hasattr(m, '__file__') # It means a built-in module
                 or m.__file__ is not None # It means not a namespace package
-                and m.__file__.startswith(prefixes) # It means a standard library or site-packages module
+                and m.__file__.startswith(prefixes_not_clean) # It means a standard library or site-packages module
         )
 
     sys_path: List[str]

@@ -3,8 +3,8 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 3)
-__all__ = ['restart_program', 'ctx_run', 'run', 'ctx_load', 'load', 
-           'prun', 'prun_module']
+__all__ = ['restart_program', 'run_file', 'run_path', 'ctx_run', 'run', 
+           'ctx_load', 'load', 'prun', 'prun_module']
 
 import inspect
 import re
@@ -14,19 +14,21 @@ import sys
 from contextlib import contextmanager
 from functools import partial
 from os import execl, getcwd, path as _path
+from runpy import run_path
 from sys import argv, executable
 from typing import (
     Any, Callable, Dict, Final, Generator, Optional, Tuple, Type, Union
 )
 from types import CodeType, ModuleType
 from urllib.parse import unquote
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 
+from .cm import ensure_cm
 from .temporary import temp_wdir, temp_sys_modules
+from .undefined import undefined 
 
 
 _PLATFORM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
-_VOID = object()
 
 
 def _startswith_protocol(
@@ -43,7 +45,7 @@ def _startswith_protocol(
 def _update_signature(
     standard_unit: Callable, 
     machining_unit: Optional[Callable] = None, 
-    return_annotation=_VOID,
+    return_annotation=undefined,
 ):
     if machining_unit is None:
         return partial(
@@ -52,7 +54,7 @@ def _update_signature(
             return_annotation=return_annotation, 
         )
     sig: inspect.Signature = inspect.signature(standard_unit)
-    if return_annotation is not _VOID:
+    if return_annotation is not undefined:
         sig = sig.replace(return_annotation=return_annotation)
     machining_unit.__signature__ = sig # type: ignore
 
@@ -64,9 +66,55 @@ def _update_signature(
     return machining_unit
 
 
+def _read_source(path) -> Tuple[str, str]:
+    file: str
+    if isinstance(path, Request):
+        req = urlopen(path)
+        file = req.full_url
+    elif isinstance(path, str):
+        file = path
+        if path.startswith(('http://', 'https://')):
+            req = urlopen(path)
+        else:
+            req = open(path, 'rb')
+    else:
+        raise TypeError(type(path)) from NotImplementedError
+
+    with req as f:
+        return file, f.read().decode('utf-8')
+
+
 def restart_program(argv=argv):
     'restart the program'
     execl(executable, executable, *argv)
+
+
+def run_file(
+    path, 
+    namespace: Optional[dict] = None, 
+    read_source: Callable[..., Tuple[str, str]] = _read_source,
+) -> dict:
+    '''Run a [file], from a [file] | [url] | [source object].
+
+    :param path: The path or source object of the python script.
+    :param namespace: Execute the given source in the context of namespace.
+                      If it is None (the default), will create a new dict().
+    :param read_source: Take path or request source, return tuple of file path and text.
+
+    :return: Dictionary of script execution results.
+    '''
+    file_path, source = read_source(path)
+
+    if namespace is None:
+        namespace = {
+            '__name__': '__main__', 
+            '__package__': '', 
+            '__file__': file_path, 
+        }
+
+    code = compile(source, file_path, 'exec')
+    exec(code, namespace)
+    return namespace
 
 
 @contextmanager
@@ -76,6 +124,7 @@ def ctx_run(
     wdir: Optional[str] = None, 
     mainfile: Union[str, Tuple[str, ...]] = ('__main__.py', 'main.py', '__init__.py'),
     clean_sys_modules: bool = True,
+    prefixes_not_clean: Tuple[str, ...] = tuple(set(__import__('site').PREFIXES)),
     restore_sys_modules: bool = True,
 ) -> Generator[Dict[str, Any], None, None]:
     '''Run a [file] / [mainfile in directory], from a [file] | [url] | [directory].
@@ -90,6 +139,7 @@ def ctx_run(
     :param clean_sys_modules: Determine whether to restore `sys.modules` at the beginning.
         If `clean_sys_modules` is True, it will retain built-in modules and standard libraries and 
         site-packages modules / packages, but clear namespace packages and any other modules / packages.
+    :param prefixes_not_clean: Modules and packages prefixed with `prefixes_not_clean` will not be cleaned up.
     :param restore_sys_modules: Determine whether to restore `sys.modules` at the end.
 
     :return: Dictionary of script execution results.
@@ -147,24 +197,24 @@ def ctx_run(
     namespace['__package__'] = package_name
 
     with temp_sys_modules(
-        mdir, 
-        clean=clean_sys_modules, 
-        restore=restore_sys_modules, 
-    ):
+            mdir, 
+            clean=clean_sys_modules, 
+            restore=restore_sys_modules,
+            prefixes_not_clean=prefixes_not_clean,
+        ), \
+        ensure_cm(None if wdir == getcwd() else temp_wdir(wdir)) \
+    :
         code: CodeType = compile(source, path, 'exec')
-        if wdir == getcwd():
-            exec(code, namespace)
-        else:
-            with temp_wdir(wdir):
-                exec(code, namespace)
 
-    yield dict(
-        namespace=namespace,
-        path=path, 
-        code=code, 
-        sys_path=sys.path.copy(),
-        sys_modules=sys.modules.copy(),
-    )
+        exec(code, namespace)
+
+        yield dict(
+            namespace=namespace,
+            path=path, 
+            code=code, 
+            sys_path=sys.path.copy(),
+            sys_modules=sys.modules.copy(),
+        )
 
 
 @_update_signature(ctx_run, return_annotation=Dict[str, Any])
@@ -179,6 +229,7 @@ def ctx_load(
     wdir: Optional[str] = None,
     mainfile: Union[str, Tuple[str, ...]] = '__init__.py',
     as_sys_module: bool = False,
+    prefixes_not_clean: Tuple[str, ...] = tuple(set(__import__('site').PREFIXES)),
 ) -> Generator[ModuleType, None, None]:
     '''Load a [module] | [package], from a [file] | [directory] | [url].
 
@@ -188,6 +239,7 @@ def ctx_load(
     :param mainfile: If the `path` is a directory, according to this parameter, 
                      an existing main file will be used.
     :param as_sys_module: If True, module will be set to sys.modules.
+    :param prefixes_not_clean: Modules and packages prefixed with `prefixes_not_clean` will not be cleaned up.
 
     :return: A new module.
     '''
@@ -200,6 +252,7 @@ def ctx_load(
         mainfile=mainfile, 
         clean_sys_modules=not as_sys_module,
         restore_sys_modules=not as_sys_module,
+        prefixes_not_clean=prefixes_not_clean,
     ) as info:
         if as_sys_module:
             sys.modules[info['path']] = mod

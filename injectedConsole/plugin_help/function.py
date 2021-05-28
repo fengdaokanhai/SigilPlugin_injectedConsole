@@ -2,23 +2,26 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 3)
+__version__ = (0, 0, 4)
 __all__ = [
     'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 
     'reload_shell', 'back_shell', 'reload_embeded_shell', 'reload_to_shell', 
-    'run_plugin', 'start_nbterm', 'start_qtconsole', 'start_jupyter_notebook', 
-    'start_jupyter_lab', 
+    'run_env', 'run_plugin', 'start_nbterm', 'start_qtconsole', 'start_spyder', 
+    'start_jupyter_notebook', 'start_jupyter_lab', 'start_python_shell', 
 ]
 
 
 import subprocess
+import sys
 
 from contextlib import contextmanager
-from os import _exit, path
+from copy import deepcopy
+from os import _exit, path as _path
 from pickle import load as pickle_load, dump as pickle_dump
-from sys import _getframe, argv, executable
 from tempfile import NamedTemporaryFile
-from typing import cast, Final, List, Mapping, Optional
+from traceback import print_exc
+from typing import cast, Any, Final, List, Mapping, Optional
+from xml.etree.ElementTree import parse as parse_xml_file
 
 from wrapper import Wrapper # type: ignore
 from bookcontainer import BookContainer # type: ignore
@@ -29,15 +32,17 @@ from validationcontainer import ValidationContainer # type: ignore
 from plugin_util.colored import colored
 from plugin_util.console import start_specific_python_console
 from plugin_util.dictattr import DictAttr
-from plugin_util.run import ctx_run, prun_module, restart_program
+from plugin_util.run import ctx_load, run_file, prun_module, restart_program
+from plugin_util.temporary import temp_list
+from plugin_util.usepip import ensure_import
 
 
 _SYSTEM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
-_PATH: Final[Mapping] = __import__('builtins')._PATH
-_OUTDIR: Final[str] = _PATH['outdir']
-_ABORTFILE: Final[str] = path.join(_OUTDIR, 'abort.exists')
-_ENVFILE: Final[str] = path.join(_OUTDIR, 'env.py')
-_PKLFILE: Final[str] = path.join(_OUTDIR, 'wrapper.pkl')
+_injectedConsole_PATH: Final[Mapping] = __import__('builtins')._injectedConsole_PATH
+_OUTDIR: Final[str] = _injectedConsole_PATH['outdir']
+_ABORTFILE: Final[str] = _path.join(_OUTDIR, 'abort.exists')
+_ENVFILE: Final[str] = _path.join(_OUTDIR, 'env.py')
+_PKLFILE: Final[str] = _path.join(_OUTDIR, 'wrapper.pkl')
 _WRAPPER: Optional[Wrapper] = None
 
 
@@ -55,19 +60,19 @@ def exit() -> None:
 
 def dump_wrapper(wrapper: Optional[Wrapper] = None) -> None:
     'Dump wrapper to file.'
-    global _WRAPPER
-    pickle_dump(wrapper or _WRAPPER, open(_PKLFILE, 'wb'))
+    if wrapper is None:
+        wrapper = _WRAPPER
+    pickle_dump(wrapper, open(_PKLFILE, 'wb'))
 
 
-def load_wrapper(clear: bool = False) -> Wrapper:
+def load_wrapper() -> Wrapper:
     'Load wrapper from file.'
     global _WRAPPER
     wrapper = pickle_load(open(_PKLFILE, 'rb'))
     if _WRAPPER is None:
         _WRAPPER = wrapper
     else:
-        if clear:
-            _WRAPPER.__dict__.clear()
+        _WRAPPER.__dict__.clear()
         _WRAPPER.__dict__.update(wrapper.__dict__)
     return _WRAPPER
 
@@ -87,7 +92,7 @@ def _ctx_wrapper():
 def get_container(wrapper=None) -> Mapping:
     'Get the sigil containers.'
     if wrapper is None:
-        wrapper = load_wrapper()
+        wrapper = _WRAPPER
 
     # collect the containers
     return DictAttr(
@@ -107,7 +112,7 @@ def reload_shell(shell: str) -> None:
     ).strip()
     if are_u_sure not in ('', 'y', 'Y'):
         return
-    argv_ = argv.copy()
+    argv_ = sys.argv.copy()
     try:
         idx = argv_.index('--shell')
     except ValueError:
@@ -128,7 +133,7 @@ def reload_shell(shell: str) -> None:
     restart_program(argv_)
 
 
-def back_shell(argv: List[str] = argv) -> None:
+def back_shell(argv: List[str] = sys.argv) -> None:
     'back to previous shell (if any)'
     argv_: List[str] = argv.copy()
     try:
@@ -152,18 +157,90 @@ def back_shell(argv: List[str] = argv) -> None:
 def reload_embeded_shell(shell, banner='', namespace=None):
     'reload to another embedded shell'
     if namespace is None:
-        namespace = _getframe(1).f_locals
+        namespace = sys._getframe(1).f_locals
     start_specific_python_console(namespace, banner, shell)
 
 
 reload_to_shell = reload_embeded_shell if _SYSTEM_IS_WINDOWS else reload_shell
 
 
+def run_env(forcible_execution: bool = False, /) -> None:
+    'Run env.py, to inject some configuration and global variables'
+    if forcible_execution:
+        __import__('builtins')._injectedConsole_RUNPY = False
+    run_file(_ENVFILE, sys._getframe(1).f_globals)
+
+
+def _run_plugin(
+    file_or_dir: str, 
+    bc: Optional[BookContainer] = None,
+):
+    if bc is None:
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, get_container()['edit'])
+
+    container = get_container(deepcopy(bc._w))
+
+    target_dir: str
+    target_file: str
+    if _path.isdir(file_or_dir):
+        target_dir = file_or_dir
+        target_file = _path.join(file_or_dir, 'plugin.py')
+    else:
+        target_file = file_or_dir
+        target_dir = _path.dirname(target_file)
+
+    try:
+        et = parse_xml_file(_path.join(target_dir, 'plugin.xml'))
+    except FileNotFoundError:
+        plugin_type = 'edit'
+    else:
+        plugin_type = et.findtext('type', 'edit')
+
+    if plugin_type not in ('edit', 'input', 'validation', 'output'):
+        raise ValueError('Invalid plugin type %r' % plugin_type) from NotImplementedError
+
+    with ctx_load(
+            target_file, 
+            wdir=target_dir, 
+            prefixes_not_clean=(
+                *set(__import__('site').PREFIXES), 
+                _injectedConsole_PATH['sigil_package_dir'], 
+            ), 
+        ) as mod, \
+        temp_list(sys.argv) as av, \
+        _ctx_wrapper() \
+    :
+        sys.modules['__main__'] = __import__('launcher')
+        sys.modules[getattr(mod, '__name__')] = mod
+        av[:] = [_injectedConsole_PATH['laucher_file'], 
+                 _injectedConsole_PATH['ebook_root'], 
+                 _injectedConsole_PATH['outdir'], 
+                 plugin_type, target_file]
+
+        bk = container[plugin_type]
+        try:
+            ret = getattr(mod, 'run')(bk)
+            if ret == 0 or type(ret) is not int:
+                dump_wrapper(bk._w)
+            else:
+                # Restore to unmodified (no guarantee of right result)
+                dump_wrapper(bc._w)
+        except BaseException:
+            # Restore to unmodified (no guarantee of right result)
+            dump_wrapper(bc._w)
+            raise
+        return ret
+
+
 def run_plugin(
     file_or_dir: str, 
     bc: Optional[BookContainer] = None,
     run_in_process: bool = False,
-) -> None:
+    executable: str = sys.executable,
+):
     '''Running a Sigil plug-in
 
     :param file_or_dir: Path of Sigil plug-in folder or script file.
@@ -172,42 +249,41 @@ def run_plugin(
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
     :param run_in_process: Determine whether to run the program in a child process.
+
+    :return: If `run_in_process` is True, return `subprocess.CompletedProcess`, else 
+             return the return value of the plugin function.
     '''
+    if not _path.exists(file_or_dir):
+        raise FileNotFoundError('No such file or directory: %r' % file_or_dir)
+
+    file_or_dir = _path.abspath(file_or_dir)
+
     if run_in_process:
-        with NamedTemporaryFile(suffix='.py', mode='w') as f:
+        with NamedTemporaryFile(suffix='.py', mode='w', encoding='utf-8') as f, _ctx_wrapper():
             f.write(
 f'''#!/usr/bin/env python3
 # coding: utf-8
 
-exec(open({_ENVFILE!r}, encoding='utf-8').read(), globals())
+exec(open(r'{_ENVFILE}', encoding='utf-8').read(), globals())
 
 try:
-    retcode = plugin.run_plugin({file_or_dir!r}, bc)
+    retcode = __import__('plugin_help').function._run_plugin(r'{file_or_dir}', bc)
+    print("plugin %r \\n\\t |_ return ➜ %r" % (r'{file_or_dir}', retcode))
     if type(retcode) is not int:
         retcode = 0
 except BaseException:
     retcode = -1
 
-if retcode == 0:
-    plugin.dump_wrapper()
-else:
+if retcode != 0:
+    __import__('atexit').unregister(plugin.dump_wrapper)
     __import__('os')._exit(retcode)
 ''')
             f.flush()
-            dump_wrapper()
-            subprocess.run(
+            return subprocess.run(
                 [executable, f.name], 
                 check=True, shell=_SYSTEM_IS_WINDOWS)
-            load_wrapper()
     else:
-        if bc is None:
-            bc = cast(BookContainer, _getframe(1).f_globals['bc'])
-
-        file: str = path.join(file_or_dir, 'plugin.py') \
-                    if path.isdir(file_or_dir) else file_or_dir
-
-        with ctx_run(file, {'bc': bc, 'bk': bc}) as info:
-            return info['namespace']['run'](bc)
+        return _run_plugin(file_or_dir, bc)
 
 
 def _run_env_tips(shell=None):
@@ -219,11 +295,12 @@ def _run_env_tips(shell=None):
 
 def start_nbterm(
     *args: str, 
-    executable: str = executable,
+    executable: str = sys.executable,
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
+    ensure_import('nbterm')
     if not args:
-        args = (':RUN FIRST: %run env',)
+        args = ('RUN FIRST ➜ %run env',)
     with _ctx_wrapper():
         _run_env_tips('nbterm')
         return subprocess.run(
@@ -231,13 +308,23 @@ def start_nbterm(
             check=True, shell=_SYSTEM_IS_WINDOWS)
 
 
+def _ensure_pyqt5():
+    ensure_import('PyQt5.pyrcc', 'PyQt5')
+    ensure_import('PyQt5.sip', 'PyQt5-sip')
+    ensure_import('PyQt5.Qt5', 'PyQt5-Qt5')
+    ensure_import('PyQt5.QtWebEngine', ('PyQtWebEngine', 'PyQtWebEngine-Qt5'))
+
+
 def start_qtconsole(
     *args: str, 
-    executable: str = executable,
+    executable: str = sys.executable,
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
+    ensure_import('qtconsole')
+    _ensure_pyqt5()
     if not args:
-        args = ("--FrontendWidget.banner=':RUN FIRST: %run env 😊 '",)
+        args = ('--FrontendWidget.banner=⏰ RUN COMMAND FIRST\n\t%s\n\n' 
+                % colored('%run env', 'red', attrs=['bold', 'blink']),)
     with _ctx_wrapper():
         _run_env_tips('qtconsole')
         return subprocess.run(
@@ -245,11 +332,28 @@ def start_qtconsole(
             check=True, shell=_SYSTEM_IS_WINDOWS)
 
 
+def start_spyder(
+    *args: str, 
+    executable: str = sys.executable,
+) -> subprocess.CompletedProcess:
+    'Start a spyder IDE process, and wait until it is terminated.'
+    ensure_import('spyder')
+    _ensure_pyqt5()
+    if not args:
+        args = ('-w', _OUTDIR, '--window-title', 'RUN FIRST ➜ %run env')
+    with _ctx_wrapper():
+        _run_env_tips('spyder')
+        return subprocess.run(
+            [executable, '-m', 'spyder.app.start', *args], 
+            shell=_SYSTEM_IS_WINDOWS)
+
+
 def start_jupyter_notebook(
     *args: str, 
-    executable: str = executable,
+    executable: str = sys.executable,
 ) -> subprocess.CompletedProcess:
     'Start a jupyter notebook process, and wait until it is terminated.'
+    ensure_import('jupyter')
     if not args:
         args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
     with _ctx_wrapper():
@@ -259,12 +363,37 @@ def start_jupyter_notebook(
 
 def start_jupyter_lab(
     *args: str, 
-    executable: str = executable,
+    executable: str = sys.executable,
 ) -> subprocess.CompletedProcess:
     'Start a jupyter lab process, and wait until it is terminated.'
+    ensure_import('jupyterlab')
     if not args:
         args = ('--notebook-dir="."', '--ServerApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter lab')
         return prun_module('jupyter', 'lab', *args)
+
+
+def start_python_shell(shell: str = 'python'):
+    'Start a jupyter lab process, and wait until it is terminated.'
+    try:
+        container = get_container()
+
+        start_specific_python_console(
+            {
+                'container': container, 
+                'bc': container['edit'], 
+                'bk': container['edit'], 
+                'bookcontainer': container['edit'], 
+                'w': _WRAPPER, 
+                'wrapper': _WRAPPER, 
+                'plugin': __import__('plugin_help'), 
+            }, 
+            shell=shell, 
+        )
+        dump_wrapper()
+    except BaseException:
+        print(colored('[ERROR]', 'red', attrs=['bold']))
+        print_exc()
+        back_shell()
 
