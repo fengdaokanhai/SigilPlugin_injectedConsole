@@ -2,20 +2,20 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1, 7)
-__revision__ = 5
+__version__ = (0, 1, 8)
+__revision__ = 0
 __all__ = ['run']
 
-
+import builtins
 import json
 import sys
 
 from contextlib import contextmanager
 from os import chdir, path, remove, symlink
 from typing import Final, Optional, Tuple
+from types import MappingProxyType
 
-from plugin_util.encode_args import b64encode_pickle
-from plugin_util.terminal import start_terminal
+from plugin_util.xml_tkinter import TkinterXMLConfigParser
 
 
 MUDULE_DIR: Final[str] = path.dirname(path.abspath(__file__))
@@ -44,14 +44,6 @@ def _rm(path) -> bool:
         return False
 
 
-def get_config_webui() -> dict:
-    raise NotImplementedError
-
-
-def get_config_tui() -> dict:
-    raise NotImplementedError
-
-
 @contextmanager
 def _ctx_conifg():
     try:
@@ -67,36 +59,25 @@ def _ctx_conifg():
         json.dump(config, open(CONFIG_JSON_FILE, 'w', encoding='utf-8'))
 
 
+def get_config_webui() -> dict:
+    raise NotImplementedError
+
+
+def get_config_tui() -> dict:
+    raise NotImplementedError
+
+
 def _get_config_gui(pipe=None) -> dict:
-    import tkinter
-    from tkinter import ttk
+    with _ctx_conifg() as config:
+        config.setdefault('shell', SHELLS[0])
+        config.setdefault('errors', 'ignore')
+        config.setdefault('startup', [])
 
-    def set_shell(*args):
-        nonlocal shell
-        shell = comboxlist.get()
-
-    with _ctx_conifg() as old_config:
-        try:
-            shell = old_config['shell']
-            shell_idx = SHELLS.index(shell)
-        except (KeyError, ValueError):
-            shell = 'python'
-            shell_idx = 0
-
-        app = tkinter.Tk()
-        app.title('Select a shell')
-        comvalue = tkinter.StringVar()
-        comboxlist = ttk.Combobox(
-            app, textvariable=comvalue, state='readonly')
-        comboxlist["values"] = SHELLS
-        comboxlist.current(shell_idx)
-        comboxlist.bind("<<ComboboxSelected>>", set_shell)
-        comboxlist.bind("<Return>", lambda *args: app.quit())
-        comboxlist.pack()
-        app.mainloop()
-
-        config = {'shell': shell}
-        old_config.update(config)
+        tkapp = TkinterXMLConfigParser(
+            path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), 
+            {'config': config, 'SHELLS': SHELLS}
+        )
+        tkapp.start()
 
         if pipe:
             pipe.send(config)
@@ -122,6 +103,8 @@ def get_config_gui(new_process: bool = True) -> dict:
 
 
 def run(bc) -> Optional[int]:
+    config = get_config_gui()
+
     laucher_file, ebook_root, outdir, _, target_file = sys.argv
     this_plugin_dir = path.dirname(target_file)
     sigil_package_dir = path.dirname(laucher_file)
@@ -134,12 +117,15 @@ def run(bc) -> Optional[int]:
         ebook_root        = ebook_root,
         outdir            = outdir,
     )
-    __import__('builtins')._injectedConsole_PATH = pathes
 
     abortfile = path.join(outdir, 'abort.exists')
     envfile = path.join(outdir, 'env.py')
-    envfile_link = path.join(path.expanduser('~'), 'env.py')
+    envfile_link = path.expanduser('~/env.py')
+    argsfile = path.join(outdir, 'args.pkl')
     mainfile = path.join(this_plugin_dir, 'main.py')
+
+    setattr(builtins, '_injectedConsole_PATH', MappingProxyType(pathes))
+    setattr(builtins, '_injectedConsole_STARTUP', tuple(config['startup']))
 
     from plugin_help import function
 
@@ -158,7 +144,9 @@ if getattr(__builtins, '_injectedConsole_RUNPY', False):
 """)
 else:
     # Injecting builtins variable: _injectedConsole_PATH
-    __builtins._injectedConsole_PATH = {pathes!r}
+    __builtins._injectedConsole_PATH = __import__('types').MappingProxyType({pathes!r})
+    # Injecting builtins variable: _injectedConsole_STARTUP
+    __builtins._injectedConsole_STARTUP = {tuple(config['startup'])!r}
 
     # Injecting module pathes
     __sys_path = __import__('sys').path
@@ -177,6 +165,13 @@ else:
     # Callback at exit
     __import__('atexit').register(plugin.dump_wrapper)
 
+    # Perform startup scripts
+    plugin.function._startup(
+        _injectedConsole_STARTUP, 
+        globals(), 
+        r'{config['errors']}', 
+    )
+
     # Execution success information
     print("""
     🎉🎉🎉 Environment loaded successfully
@@ -192,17 +187,28 @@ del __builtins
 
     chdir(outdir)
 
-    config = get_config_gui()
-    shell = config['shell']
-
     try:
+        shell = config['shell']
         if shell == 'qtconsole':
             function.start_qtconsole()
         elif shell == 'spyder':
             function.start_spyder()
         else:
-            start_terminal([sys.executable, mainfile, '--args', 
-                            b64encode_pickle(pathes), '--shell', shell])
+            from plugin_util.terminal import start_terminal
+
+            __import__('pickle').dump(
+                {
+                    'path': pathes, 
+                    'startup': tuple(config['startup']), 
+                    'errors': config['errors'], 
+                }, 
+                open(argsfile, 'wb'), 
+            )
+            start_terminal([
+                sys.executable, mainfile, 
+                '--args', argsfile, 
+                '--shell', shell, 
+            ])
     finally:
         _rm(envfile_link)
 

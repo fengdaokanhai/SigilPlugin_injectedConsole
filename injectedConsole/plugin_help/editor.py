@@ -4,7 +4,7 @@ This module provides some functions for modifying files in the
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 10)
+__version__ = (0, 1)
 __all__ = [
     'WriteBack', 'DoNotWriteBack', 'make_element','make_html_element', 
     'xml_fromstring', 'xml_tostring', 'html_fromstring', 'html_tostring', 
@@ -39,6 +39,8 @@ from lxml.html import ( # type: ignore
 )
 
 from bookcontainer import BookContainer # type: ignore
+
+from . import function
 
 
 T = TypeVar('T')
@@ -316,7 +318,10 @@ def edit(
     :return: Is it successful?
     '''
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     content = bc.readfile(manifest_id)
 
@@ -381,7 +386,10 @@ def ctx_edit(
                 data['data'] = content_new
     '''
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(2).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     content = bc.readfile(manifest_id)
 
@@ -446,7 +454,10 @@ def ctx_edit_sgml(
             operations_on_etree(etree)
     '''
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(2).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     content = bc.readfile(manifest_id)
     tree = fromstring(content.encode('utf-8'))
@@ -496,7 +507,10 @@ def ctx_edit_html(
             operations_on_etree(etree)
     '''
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(2).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     return (yield from ctx_edit_sgml.__wrapped__( # type: ignore
         manifest_id, 
@@ -561,7 +575,10 @@ def edit_iter(
     predicate = _make_standard_predicate(predicate)
 
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     if manifest_id_s is None:
         it = bc.manifest_iter()
@@ -614,7 +631,10 @@ def edit_batch(
     predicate = _make_standard_predicate(predicate)
 
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     if manifest_id_s is None:
         it = bc.manifest_iter()
@@ -685,7 +705,10 @@ def edit_html_iter(
     predicate = _make_standard_predicate(predicate)
 
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     for fid, href in bc.text_iter():
         mime = bc.id_to_mime(fid)
@@ -741,7 +764,10 @@ def edit_html_batch(
     predicate = _make_standard_predicate(predicate)
 
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     success_status: Dict[str, bool] = {}
     for fid, href in bc.text_iter():
@@ -878,7 +904,10 @@ def element_iter(
         select = path
 
     if bc is None:
-        bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
 
     i: int = 0
     data: dict
@@ -903,7 +932,11 @@ class EditStack(Mapping[str, T]):
 
     def __init__(self, bc: Optional[BookContainer] = None) -> None:
         if bc is None:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+            try:
+                bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+            except KeyError:
+                bc = cast(BookContainer, function._EDIT_CONTAINER)
+
         self._edit_stack: ExitStack = ExitStack()
         self._data: Dict[str, T] = {}
         self._bc: BookContainer = bc

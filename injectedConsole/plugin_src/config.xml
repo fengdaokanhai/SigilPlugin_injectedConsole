@@ -1,0 +1,168 @@
+<tk m-title="configuration">
+    <script type="text/python">
+        from tkinter.font import Font
+
+        font_bold_underline = Font(weight='bold', underline=1)
+
+        # Fork from [python - How to display tool tips in Tkinter?](https://try2explore.com/questions/10367355)
+        class Tooltip(object):
+            """
+            create a tooltip for a given widget
+            """
+            def __init__(self, widget, text='widget info'):
+                self.waittime = 500     #miliseconds
+                self.wraplength = 180   #pixels
+                self.widget = widget
+                self.text = text
+                self.widget.bind("&lt;Enter&gt;", self.enter)
+                self.widget.bind("&lt;Leave&gt;", self.leave)
+                self.widget.bind("&lt;ButtonPress&gt;", self.leave)
+                self.id = None
+                self.tw = None
+
+            def enter(self, event=None):
+                self.schedule()
+
+            def leave(self, event=None):
+                self.unschedule()
+                self.hidetip()
+
+            def schedule(self):
+                self.unschedule()
+                self.id = self.widget.after(self.waittime, self.showtip)
+
+            def unschedule(self):
+                id = self.id
+                self.id = None
+                if id:
+                    self.widget.after_cancel(id)
+
+            def showtip(self, event=None):
+                x = y = 0
+                x, y, cx, cy = self.widget.bbox("insert")
+                x += self.widget.winfo_rootx() + 25
+                y += self.widget.winfo_rooty() + 20
+                # creates a toplevel window
+                self.tw = tk.Toplevel(self.widget)
+                # Leaves only the label and removes the app window
+                self.tw.wm_overrideredirect(True)
+                self.tw.wm_geometry("+%d+%d" % (x, y))
+                label = tk.Label(self.tw, text=self.text, justify='left',
+                            background="#ffffff", relief='solid', borderwidth=1,
+                            wraplength = self.wraplength)
+                label.pack(ipadx=1)
+
+            def hidetip(self):
+                tw = self.tw
+                self.tw= None
+                if tw:
+                    tw.destroy()
+    </script>
+    <label bd="1" relief="sunken" anchor="w" m-pack="side=top,fill=x" text="close the window to take effect" bg="red" fg="yellow" font="([font_bold_underline])" />
+    <label text="Select a Shell" height="2" font="([font_bold_underline])">
+        <Tooltip text="Select a shell to start (Missing dependencies will be automatically installed)" />
+    </label>
+    <ttk.combobox name="cb_selsh" state="readonly" />
+    <ttk.separator orient="horizontal" m-pack="fill=x" />
+    <script type="text/python">
+        from tkinter import filedialog
+
+        def click_add_file():
+            filenames = filedialog.askopenfilenames()
+            if filenames:
+                namemap['lb'].insert(tk.END, *filenames)
+                config['startup'] = namemap['lb'].get(0, tk.END)
+
+        def click_add_dir():
+            directory = filedialog.askdirectory()
+            if directory:
+                namemap['lb'].insert(tk.END, directory)
+                config['startup'] = namemap['lb'].get(0, tk.END)
+
+        def click_del_sel():
+            sels = namemap['lb'].curselection()
+            if sels:
+                for sel in reversed(sels):
+                    namemap['lb'].delete(sel)
+                config['startup'] = namemap['lb'].get(0, tk.END)
+
+        def click_clear():
+            namemap['lb'].delete(0, tk.END)
+            config['startup'] = ()
+
+        def set_shell(*args):
+            config['shell'] = namemap['cb_selsh'].get()
+
+        def quit_app(*args):
+            app.quit()
+
+        try:
+            def startfile(path, _start=__import__('os').startfile):
+                _start(path)
+        except AttributeError:
+            _PLATFROM_SYSTEM = __import__('platform').system()
+            if _PLATFROM_SYSTEM == 'Linux':
+                def startfile(path, _start=__import__('subprocess').Popen):
+                    _start(['xdg-open', path])
+            elif _PLATFROM_SYSTEM == 'Darwin':
+                def startfile(path, _start=__import__('subprocess').Popen):
+                    _start(['open', path])
+            else:
+                def startfile(path):
+                    pass
+            del _PLATFROM_SYSTEM
+
+        def lb_startfile(*args):
+            path = namemap['lb'].get(namemap['lb'].curselection())
+            startfile(path)
+
+        def change_startup_errors():
+            config['errors'] = namemap['startup_errors'].get()
+
+        cb_selsh['values'] = SHELLS
+        cb_selsh.current(SHELLS.index(config['shell']))
+        cb_selsh.bind("&lt;&lt;ComboboxSelected&gt;&gt;", set_shell)
+        cb_selsh.bind("&lt;Return&gt;", quit_app)
+    </script>
+    <label text="Select Some Startups" height="2" font="([font_bold_underline])">
+        <Tooltip init-="text=([text])" >WARNING: PLEASE CONFIRM THE SECURITY OF THE ADDED STARTUP BY YOURSELF IN ADVANCE.
+
+Add some scripts that will be executed or registered automatically at startup.
+
+It will deal with the following situations separately:
+    1. execute:  A file (e.g., suffixed by .py or .pyz), or a folder (or a .zip file) with __main__.py, will be executed directly.
+    2. register: A folder (or .zip file) without __main__.py will be appended to sys.path.
+        </Tooltip>
+    </label>
+    <frame>
+        <StringVar value="([config['errors']])" name="startup_errors" />
+        <label text="Errors" m-grid="row=0,column=0" font="([font_bold_underline])" >
+            <Tooltip text="How to deal with errors?" />
+        </label>
+        <radiobutton variable="([startup_errors])" text="ignore" value="ignore" m-grid="row=0,column=1" command="([change_startup_errors])">
+            <Tooltip text="To ignore the error and continue processing the remaining startups" />
+        </radiobutton>
+        <radiobutton variable="([startup_errors])" text="raise" value="raise" m-grid="row=0,column=2" command="([change_startup_errors])">
+            <Tooltip text="To raise an exception and terminate" />
+        </radiobutton>
+        <radiobutton variable="([startup_errors])" text="stop" value="stop" m-grid="row=0,column=3" command="([change_startup_errors])">
+            <Tooltip text="Stop processing the remaining startups and go directly to the shell" />
+        </radiobutton>
+    </frame>
+    <frame>
+        <button text="add files" width="10" command="([click_add_file])" m-pack="side=left" />
+        <button text="add folder" width="10" command="([click_add_dir])" m-pack="side=left" />
+    </frame>
+    <frame>
+        <button text="delete selected" width="10" command="([click_del_sel])" m-pack="side=left" />
+        <button text="clear all" width="10" command="([click_clear])" m-pack="side=left" />
+    </frame>
+    <scrollbar name="sc" orient="vertical" m-pack="side=right,fill=y"/>
+    <listbox name="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
+    <script type="text/python">
+        lb.config(yscrollcommand=sc.set)
+        sc.config(command=lb.yview)
+        lb.bind('&lt;Double-Button-1&gt;', lb_startfile)
+        lb.insert(0, *config['startup'])
+    </script>
+</tk>

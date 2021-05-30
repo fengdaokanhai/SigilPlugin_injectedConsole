@@ -2,11 +2,11 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 4)
+__version__ = (0, 0, 6)
 __all__ = [
-    'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 
-    'reload_shell', 'back_shell', 'reload_embeded_shell', 'reload_to_shell', 
-    'run_env', 'run_plugin', 'start_nbterm', 'start_qtconsole', 'start_spyder', 
+    'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 'reload_shell', 
+    'back_shell', 'reload_embeded_shell', 'reload_to_shell', 'run_env', 'load_script', 
+    'run_plugin', 'start_nbterm', 'start_qtconsole', 'start_spyder', 
     'start_jupyter_notebook', 'start_jupyter_lab', 'start_python_shell', 
 ]
 
@@ -18,10 +18,16 @@ from contextlib import contextmanager
 from copy import deepcopy
 from os import _exit, path as _path
 from pickle import load as pickle_load, dump as pickle_dump
+from runpy import run_path
 from tempfile import NamedTemporaryFile
 from traceback import print_exc
-from typing import cast, Any, Final, List, Mapping, Optional
-from xml.etree.ElementTree import parse as parse_xml_file
+from typing import cast, Any, Final, List, Mapping, Optional, Tuple
+from zipfile import ZipFile
+
+try:
+    from lxml.etree import parse as parse_xml_file # type: ignore
+except ImportError:
+    from xml.etree.ElementTree import parse as parse_xml_file
 
 from wrapper import Wrapper # type: ignore
 from bookcontainer import BookContainer # type: ignore
@@ -39,11 +45,16 @@ from plugin_util.usepip import ensure_import
 
 _SYSTEM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
 _injectedConsole_PATH: Final[Mapping] = __import__('builtins')._injectedConsole_PATH
+_injectedConsole_STARTUP: Final[Tuple[str, ...]] = __import__('builtins')._injectedConsole_STARTUP
 _OUTDIR: Final[str] = _injectedConsole_PATH['outdir']
 _ABORTFILE: Final[str] = _path.join(_OUTDIR, 'abort.exists')
 _ENVFILE: Final[str] = _path.join(_OUTDIR, 'env.py')
 _PKLFILE: Final[str] = _path.join(_OUTDIR, 'wrapper.pkl')
 _WRAPPER: Optional[Wrapper] = None
+_EDIT_CONTAINER: Optional[BookContainer] = None
+_INPUT_CONTAINER: Optional[InputContainer] = None
+_OUTPUT_CONTAINER: Optional[OutputContainer] = None
+_VALIDATION_CONTAINER: Optional[ValidationContainer] = None
 
 
 def abort() -> None:
@@ -67,10 +78,15 @@ def dump_wrapper(wrapper: Optional[Wrapper] = None) -> None:
 
 def load_wrapper() -> Wrapper:
     'Load wrapper from file.'
-    global _WRAPPER
+    global _WRAPPER, _EDIT_CONTAINER, _INPUT_CONTAINER, \
+           _OUTPUT_CONTAINER, _VALIDATION_CONTAINER
     wrapper = pickle_load(open(_PKLFILE, 'rb'))
     if _WRAPPER is None:
-        _WRAPPER = wrapper
+        _WRAPPER              = wrapper
+        _EDIT_CONTAINER       = BookContainer(wrapper)
+        _INPUT_CONTAINER      = InputContainer(wrapper)
+        _OUTPUT_CONTAINER     = OutputContainer(wrapper)
+        _VALIDATION_CONTAINER = ValidationContainer(wrapper)
     else:
         _WRAPPER.__dict__.clear()
         _WRAPPER.__dict__.update(wrapper.__dict__)
@@ -99,8 +115,8 @@ def get_container(wrapper=None) -> Mapping:
         wrapper    = wrapper,
         edit       = BookContainer(wrapper),
         input      = InputContainer(wrapper),
-        validation = ValidationContainer(wrapper),
         output     = OutputContainer(wrapper),
+        validation = ValidationContainer(wrapper),
     )
 
 
@@ -171,16 +187,85 @@ def run_env(forcible_execution: bool = False, /) -> None:
     run_file(_ENVFILE, sys._getframe(1).f_globals)
 
 
-def _run_plugin(
-    file_or_dir: str, 
-    bc: Optional[BookContainer] = None,
-):
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, get_container()['edit'])
+def load_script(
+    path: str, 
+    globals: Optional[dict] = None, 
+) -> bool:
+    '''To execute or register some script.
 
+    :param path: Path of a script (a file or folder).
+    :param globals: The global namespace used to execute the script.
+
+    :return: True means that the script has been executed, False means that 
+             the script (as a package) has been appended to `sys.path`.
+
+    TIPS: It will deal with the following situations separately:
+        1. A file (e.g., suffixed by .py or .pyz), or a folder (or a .zip file) 
+           with __main__.py, will be executed directly.
+        2. A folder (or .zip file) without __main__.py will be appended to sys.path.
+    '''
+    if not _path.exists(path):
+        raise FileNotFoundError('No such file or directory: %r' % path)
+
+    as_sys_path: bool = False
+    if _path.isdir(path):
+        as_sys_path = not _path.exists(_path.join(path, '__main__.py'))
+    elif path.endswith('.zip'):
+        as_sys_path = '__main__.py' not in ZipFile(path).NameToInfo
+
+    if as_sys_path:
+        sys.path.append(path)
+        return False
+
+    if globals is None:
+        globals = sys._getframe(1).f_globals
+
+    ret: dict = cast(dict, run_path(path, globals, '__main__'))
+    globals.update((k, v) for k, v in ret.items() 
+                   if not k.startswith('_'))
+    return True
+
+
+def _startup(
+    startups: Tuple[str, ...] = _injectedConsole_STARTUP, 
+    namespace: Optional[dict] = None, 
+    errors: str = 'ignore',
+) -> dict:
+    if namespace is None:
+        namespace = {}
+
+    success_count: int = 0
+    error_count: int = 0
+    for i, path in enumerate(startups, 1):
+        try:
+            if load_script(path, namespace):
+                print(colored('◉ LOADED', 'green', attrs=['bold', 'blink']), '➜', i, path)
+            else:
+                print(colored('◉ APPENDED', 'yellow', attrs=['bold', 'blink']), '➜', i, path)
+            success_count += 1
+        except BaseException:
+            print(colored('◉ ERROR', 'red', attrs=['bold', 'blink']), '➜', i, path)
+            if errors == 'raise':
+                raise
+            print_exc()
+            if errors == 'stop':
+                print(colored(
+                    '🤗 %s SUCCESSES, 🤯 AN ERROR OCCURRED, 🤕 SKIPPING THE REMAINING %s STARTUPS' 
+                    % (success_count, len(startups) - success_count - 1), 
+                    'red', attrs=['bold', 'blink']))
+                break
+            error_count += 1
+    else:
+        if error_count:
+            print(colored('😀 PROCESSED ALL, 🤗 %s SUCCESSES, 😷 %s ERRORS FOUND' % (success_count, error_count), 
+                          'yellow', attrs=['bold', 'blink']))
+        else:
+            print(colored('😀 PROCESSED ALL, 🤗 %s SUCCESSES, 😏 NO ERRORS FOUND' % success_count, 
+                          'green', attrs=['bold', 'blink']))
+    return namespace
+
+
+def _run_plugin(file_or_dir: str, bc: BookContainer):
     container = get_container(deepcopy(bc._w))
 
     target_dir: str
@@ -283,6 +368,12 @@ if retcode != 0:
                 [executable, f.name], 
                 check=True, shell=_SYSTEM_IS_WINDOWS)
     else:
+        if bc is None:
+            try:
+                bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+            except KeyError:
+                bc = cast(BookContainer, _EDIT_CONTAINER)
+
         return _run_plugin(file_or_dir, bc)
 
 
@@ -374,23 +465,29 @@ def start_jupyter_lab(
         return prun_module('jupyter', 'lab', *args)
 
 
-def start_python_shell(shell: str = 'python'):
+def start_python_shell(
+    namespace: Optional[dict] = None, 
+    banner: str = '', 
+    shell: str = 'python', 
+) -> None:
     'Start a jupyter lab process, and wait until it is terminated.'
     try:
         container = get_container()
 
-        start_specific_python_console(
-            {
-                'container': container, 
-                'bc': container['edit'], 
-                'bk': container['edit'], 
-                'bookcontainer': container['edit'], 
-                'w': _WRAPPER, 
-                'wrapper': _WRAPPER, 
-                'plugin': __import__('plugin_help'), 
-            }, 
-            shell=shell, 
-        )
+        if namespace is None:
+            namespace = {}
+
+        namespace.update({
+            'container': container, 
+            'bc': container['edit'], 
+            'bk': container['edit'], 
+            'bookcontainer': container['edit'], 
+            'w': _WRAPPER, 
+            'wrapper': _WRAPPER, 
+            'plugin': __import__('plugin_help'), 
+        })
+
+        start_specific_python_console(namespace, shell=shell)
         dump_wrapper()
     except BaseException:
         print(colored('[ERROR]', 'red', attrs=['bold']))

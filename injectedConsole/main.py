@@ -19,19 +19,23 @@ ap.add_argument(
 )
 args = ap.parse_args()
 
-from typing import Final, Mapping
+import builtins, os, sys, traceback
 
-from plugin_util.encode_args import b64decode_pickle
-from plugin_util.usepip import ensure_import
+from typing import Final, Tuple, Mapping
+from types import MappingProxyType
 
-import builtins as __builtins
-_injectedConsole_PATH: Final[Mapping[str, str]] = b64decode_pickle(args.args)
-setattr(__builtins, '_injectedConsole_PATH', _injectedConsole_PATH)
+_config: dict = __import__('pickle').load(open(args.args, 'rb'))
+_injectedConsole_PATH: Final[Mapping[str, str]] = MappingProxyType(_config['path'])
+_injectedConsole_STARTUP: Final[Tuple[str]] = _config['startup']
+setattr(builtins, '_injectedConsole_PATH', _injectedConsole_PATH)
+setattr(builtins, '_injectedConsole_STARTUP', _injectedConsole_STARTUP)
 
-__import__('os').chdir(_injectedConsole_PATH['outdir'])
-__import__('sys').path.insert(0, _injectedConsole_PATH['sigil_package_dir'])
+sys.path.insert(0, _injectedConsole_PATH['sigil_package_dir'])
+os.chdir(_injectedConsole_PATH['outdir'])
 
 from plugin_help import function
+
+os.chdir(_injectedConsole_PATH['outdir'])
 
 shell: str = args.shell
 if shell == 'nbterm':
@@ -45,6 +49,13 @@ elif shell == 'jupyter notebook':
 elif shell == 'jupyter lab':
     function.start_jupyter_lab()
 else:
-    setattr(__builtins, '_injectedConsole_RUNPY', True)
-    function.start_python_shell(shell)
+    setattr(builtins, '_injectedConsole_RUNPY', True)
+    function.start_python_shell(
+        function._startup(
+            _injectedConsole_STARTUP, 
+            errors=_config['errors'],
+        ), 
+        'injectedConsole', 
+        shell, 
+    )
 
