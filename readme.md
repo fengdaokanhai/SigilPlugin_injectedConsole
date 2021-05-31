@@ -13,6 +13,7 @@ TODO: to be continued...
 - [mobileread](https://www.mobileread.com/)
 
 #### Documentation
+- [Python 3.x documentation](https://docs.python.org/3/)
 - [EPUB 2.0.1](http://idpf.org/epub/201)
 - [EPUB 3.0](http://idpf.org/epub/30/)
 - [EPUB 3 COMMUNITY GROUP](https://www.w3.org/community/epub3/)

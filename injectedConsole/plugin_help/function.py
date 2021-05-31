@@ -2,7 +2,7 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 6)
+__version__ = (0, 0, 7)
 __all__ = [
     'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 'reload_shell', 
     'back_shell', 'reload_embeded_shell', 'reload_to_shell', 'run_env', 'load_script', 
@@ -10,7 +10,7 @@ __all__ = [
     'start_jupyter_notebook', 'start_jupyter_lab', 'start_python_shell', 
 ]
 
-
+import builtins
 import subprocess
 import sys
 
@@ -21,7 +21,9 @@ from pickle import load as pickle_load, dump as pickle_dump
 from runpy import run_path
 from tempfile import NamedTemporaryFile
 from traceback import print_exc
-from typing import cast, Any, Final, List, Mapping, Optional, Tuple
+from typing import (
+    cast, Final, Iterable, List, Mapping, Optional, Tuple
+)
 from zipfile import ZipFile
 
 try:
@@ -40,12 +42,12 @@ from plugin_util.console import start_specific_python_console
 from plugin_util.dictattr import DictAttr
 from plugin_util.run import ctx_load, run_file, prun_module, restart_program
 from plugin_util.temporary import temp_list
-from plugin_util.usepip import ensure_import
+from plugin_util.usepip import check_install
 
 
 _SYSTEM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
-_injectedConsole_PATH: Final[Mapping] = __import__('builtins')._injectedConsole_PATH
-_injectedConsole_STARTUP: Final[Tuple[str, ...]] = __import__('builtins')._injectedConsole_STARTUP
+_injectedConsole_CONFIG: Final[dict] = getattr(builtins, '_injectedConsole_CONFIG')
+_injectedConsole_PATH: Final[Mapping] = getattr(builtins, '_injectedConsole_PATH')
 _OUTDIR: Final[str] = _injectedConsole_PATH['outdir']
 _ABORTFILE: Final[str] = _path.join(_OUTDIR, 'abort.exists')
 _ENVFILE: Final[str] = _path.join(_OUTDIR, 'env.py')
@@ -190,19 +192,24 @@ def run_env(forcible_execution: bool = False, /) -> None:
 def load_script(
     path: str, 
     globals: Optional[dict] = None, 
-) -> bool:
+    include_prefix_underline: bool = False, 
+) -> Optional[dict]:
     '''To execute or register some script.
 
     :param path: Path of a script (a file or folder).
     :param globals: The global namespace used to execute the script.
+    :param include_prefix_underline: 
+        Determine whether to include these key-value pairs that their keys are prefixed with _.
 
-    :return: True means that the script has been executed, False means that 
-             the script (as a package) has been appended to `sys.path`.
+    :return: `dict` (that is for updating) means that the script has been executed, 
+             `None` means that the script (as a package) has been appended to `sys.path`.
 
     TIPS: It will deal with the following situations separately:
         1. A file (e.g., suffixed by .py or .pyz), or a folder (or a .zip file) 
            with __main__.py, will be executed directly.
         2. A folder (or .zip file) without __main__.py will be appended to sys.path.
+    Tips: In the result dictionary of the script (result is the return value of `runpy.run_path`), 
+          all the key-value pairs, their keys are not prefixed with _, were updated to `globals`.
     '''
     if not _path.exists(path):
         raise FileNotFoundError('No such file or directory: %r' % path)
@@ -215,33 +222,56 @@ def load_script(
 
     if as_sys_path:
         sys.path.append(path)
-        return False
+        return None
 
     if globals is None:
         globals = sys._getframe(1).f_globals
 
     ret: dict = cast(dict, run_path(path, globals, '__main__'))
-    globals.update((k, v) for k, v in ret.items() 
-                   if not k.startswith('_'))
-    return True
+    sentinel = object()
+    if include_prefix_underline:
+        updating_dict: dict = {
+            k: v for k, v in ret.items() 
+            if v is not globals.get(k, sentinel)
+        }
+    else:
+        updating_dict: dict = {
+            k: v for k, v in ret.items() 
+            if not k.startswith('_') and v is not globals.get(k, sentinel)
+        }
+    globals.update(updating_dict)
+    return updating_dict
 
 
 def _startup(
-    startups: Tuple[str, ...] = _injectedConsole_STARTUP, 
     namespace: Optional[dict] = None, 
-    errors: str = 'ignore',
+    startups: Optional[Iterable[str]] = None, 
+    errors: Optional[str] = None, 
 ) -> dict:
     if namespace is None:
         namespace = {}
 
+    if startups is None:
+        startups = cast(Tuple[str], tuple(_injectedConsole_CONFIG.get('startup', ())))
+    else:
+        startups = cast(Tuple[str], tuple(startups))
+    if not startups:
+        return namespace
+
+    if errors is None:
+        errors = cast(str, str(_injectedConsole_CONFIG.get('errors', 'ignore')))
+
     success_count: int = 0
     error_count: int = 0
+    keys_updated: set = set()
     for i, path in enumerate(startups, 1):
         try:
-            if load_script(path, namespace):
-                print(colored('◉ LOADED', 'green', attrs=['bold', 'blink']), '➜', i, path)
-            else:
+            ret = load_script(path, namespace)
+            if ret is None:
                 print(colored('◉ APPENDED', 'yellow', attrs=['bold', 'blink']), '➜', i, path)
+            else:
+                keys_updated |= ret.keys()
+                print(colored('◉ LOADED', 'green', attrs=['bold', 'blink']), '➜', i, path)
             success_count += 1
         except BaseException:
             print(colored('◉ ERROR', 'red', attrs=['bold', 'blink']), '➜', i, path)
@@ -262,6 +292,14 @@ def _startup(
         else:
             print(colored('😀 PROCESSED ALL, 🤗 %s SUCCESSES, 😏 NO ERRORS FOUND' % success_count, 
                           'green', attrs=['bold', 'blink']))
+
+    if keys_updated:
+        print('The following keys had been updated\n\t|_', tuple(keys_updated))
+        keys_updated_bu_removed = keys_updated - namespace.keys()
+        if keys_updated_bu_removed:
+            print('But these keys were eventually removed\n\t|_', 
+                  tuple(keys_updated_bu_removed))
+
     return namespace
 
 
@@ -285,7 +323,9 @@ def _run_plugin(file_or_dir: str, bc: BookContainer):
         plugin_type = et.findtext('type', 'edit')
 
     if plugin_type not in ('edit', 'input', 'validation', 'output'):
-        raise ValueError('Invalid plugin type %r' % plugin_type) from NotImplementedError
+        raise ValueError(
+            'Invalid plugin type %r' % plugin_type
+        ) from NotImplementedError
 
     with ctx_load(
             target_file, 
@@ -386,32 +426,36 @@ def _run_env_tips(shell=None):
 
 def start_nbterm(
     *args: str, 
-    executable: str = sys.executable,
+    executable: str = sys.executable, 
+    shell: bool = _SYSTEM_IS_WINDOWS, 
+    **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
-    ensure_import('nbterm')
+    check_install('nbterm')
     if not args:
         args = ('RUN FIRST ➜ %run env',)
     with _ctx_wrapper():
         _run_env_tips('nbterm')
         return subprocess.run(
             [executable, '-m', 'nbterm.nbterm', *args], 
-            check=True, shell=_SYSTEM_IS_WINDOWS)
+            shell=shell, **prun_kwds)
 
 
 def _ensure_pyqt5():
-    ensure_import('PyQt5.pyrcc', 'PyQt5')
-    ensure_import('PyQt5.sip', 'PyQt5-sip')
-    ensure_import('PyQt5.Qt5', 'PyQt5-Qt5')
-    ensure_import('PyQt5.QtWebEngine', ('PyQtWebEngine', 'PyQtWebEngine-Qt5'))
+    check_install('PyQt5.pyrcc', 'PyQt5')
+    check_install('PyQt5.sip', 'PyQt5-sip')
+    check_install('PyQt5.Qt5', 'PyQt5-Qt5')
+    check_install('PyQt5.QtWebEngine', ('PyQtWebEngine', 'PyQtWebEngine-Qt5'))
 
 
 def start_qtconsole(
     *args: str, 
-    executable: str = sys.executable,
+    executable: str = sys.executable, 
+    shell: bool = _SYSTEM_IS_WINDOWS, 
+    **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
-    ensure_import('qtconsole')
+    check_install('qtconsole')
     _ensure_pyqt5()
     if not args:
         args = ('--FrontendWidget.banner=⏰ RUN COMMAND FIRST\n\t%s\n\n' 
@@ -420,15 +464,17 @@ def start_qtconsole(
         _run_env_tips('qtconsole')
         return subprocess.run(
             [executable, '-m', 'qtconsole', *args], 
-            check=True, shell=_SYSTEM_IS_WINDOWS)
+            shell=shell, **prun_kwds)
 
 
 def start_spyder(
     *args: str, 
-    executable: str = sys.executable,
+    executable: str = sys.executable, 
+    shell: bool = _SYSTEM_IS_WINDOWS, 
+    **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a spyder IDE process, and wait until it is terminated.'
-    ensure_import('spyder')
+    check_install('spyder')
     _ensure_pyqt5()
     if not args:
         args = ('-w', _OUTDIR, '--window-title', 'RUN FIRST ➜ %run env')
@@ -436,56 +482,63 @@ def start_spyder(
         _run_env_tips('spyder')
         return subprocess.run(
             [executable, '-m', 'spyder.app.start', *args], 
-            shell=_SYSTEM_IS_WINDOWS)
+            shell=shell, **prun_kwds)
 
 
 def start_jupyter_notebook(
     *args: str, 
-    executable: str = sys.executable,
+    executable: str = sys.executable, 
+    **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a jupyter notebook process, and wait until it is terminated.'
-    ensure_import('jupyter')
+    check_install('jupyter')
     if not args:
         args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter notebook')
-        return prun_module('jupyter', 'notebook', *args)
+        return prun_module('jupyter', 'notebook', *args, **prun_kwds)
 
 
 def start_jupyter_lab(
     *args: str, 
-    executable: str = sys.executable,
+    executable: str = sys.executable, 
+    **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a jupyter lab process, and wait until it is terminated.'
-    ensure_import('jupyterlab')
+    check_install('jupyterlab')
     if not args:
         args = ('--notebook-dir="."', '--ServerApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter lab')
-        return prun_module('jupyter', 'lab', *args)
+        return prun_module('jupyter', 'lab', *args, **prun_kwds)
 
 
 def start_python_shell(
+    shell: str = 'python', 
     namespace: Optional[dict] = None, 
     banner: str = '', 
-    shell: str = 'python', 
 ) -> None:
-    'Start a jupyter lab process, and wait until it is terminated.'
+    'Start the specified Python shell.'
     try:
-        container = get_container()
+        if getattr(builtins, '_injectedConsole_RUNPY', False):
+            if namespace is None:
+                namespace = sys._getframe(1).f_globals
+        else:
+            if namespace is None:
+                namespace = {}
 
-        if namespace is None:
-            namespace = {}
-
-        namespace.update({
-            'container': container, 
-            'bc': container['edit'], 
-            'bk': container['edit'], 
-            'bookcontainer': container['edit'], 
-            'w': _WRAPPER, 
-            'wrapper': _WRAPPER, 
-            'plugin': __import__('plugin_help'), 
-        })
+            container = get_container()
+            namespace.update({
+                'container': container, 
+                'bc': container['edit'], 
+                'bk': container['edit'], 
+                'bookcontainer': container['edit'], 
+                'w': _WRAPPER, 
+                'wrapper': _WRAPPER, 
+                'plugin': __import__('plugin_help'), 
+            })
+            _startup(namespace)
+            setattr(builtins, '_injectedConsole_RUNPY', True)
 
         start_specific_python_console(namespace, shell=shell)
         dump_wrapper()

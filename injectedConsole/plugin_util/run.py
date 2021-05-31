@@ -2,11 +2,12 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 3)
-__all__ = ['restart_program', 'run_file', 'run_path', 'ctx_run', 'run', 
-           'ctx_load', 'load', 'prun', 'prun_module']
+__version__ = (0, 0, 4)
+__all__ = ['run_in_process', 'restart_program', 'run_file', 'run_path', 
+           'ctx_run', 'run', 'ctx_load', 'load', 'prun', 'prun_module']
 
 import inspect
+import multiprocessing
 import re
 import subprocess
 import sys
@@ -82,6 +83,41 @@ def _read_source(path) -> Tuple[str, str]:
 
     with req as f:
         return file, f.read().decode('utf-8')
+
+
+def _pipe_result(
+    pipe, 
+    fn: Callable, 
+    args: tuple = (), 
+    kwargs: dict = {}, 
+) -> Tuple[bool, Any]:
+    try:
+        r = fn(*args, **kwargs)
+        pipe.send((True, r))
+        return (True, r)
+    except BaseException as exc:
+        pipe.send((False, exc))
+        return (False, exc)
+
+
+def run_in_process(fn: Callable, /, *args, **kwargs):
+    'Run function in child process.'
+    recv, send = multiprocessing.Pipe(duplex=False)
+    try:
+        p = multiprocessing.Process(
+            target=_pipe_result, 
+            args=(send, fn, args, kwargs), 
+            daemon=True, 
+        )
+        p.start()
+        p.join()
+        is_success, ret = recv.recv()
+        if is_success:
+            return ret
+        raise ret
+    finally:
+        recv.close()
+        send.close()
 
 
 def restart_program(argv=argv):
@@ -355,12 +391,11 @@ def prun_module(
     *args: str,
     executable: str = executable,
     continue_with_exceptions=KeyboardInterrupt,
-    check: bool = True,
     shell=_PLATFORM_IS_WINDOWS,
-    **kwds,
+    **prun_kwds,
 ) -> subprocess.CompletedProcess:
     'Run library module as a script with `prun` function.'
     return prun([executable, '-m', mod, *args], 
                 continue_with_exceptions=continue_with_exceptions, 
-                check=check, shell=shell, **kwds)
+                shell=shell, **prun_kwds)
 

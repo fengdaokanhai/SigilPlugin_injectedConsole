@@ -24,18 +24,15 @@ import builtins, os, sys, traceback
 from typing import Final, Tuple, Mapping
 from types import MappingProxyType
 
-_config: dict = __import__('pickle').load(open(args.args, 'rb'))
-_injectedConsole_PATH: Final[Mapping[str, str]] = MappingProxyType(_config['path'])
-_injectedConsole_STARTUP: Final[Tuple[str]] = _config['startup']
+_injectedConsole_CONFIG: Final[dict] = __import__('pickle').load(open(args.args, 'rb'))
+_injectedConsole_PATH: Final[Mapping[str, str]] = MappingProxyType(_injectedConsole_CONFIG['path'])
+setattr(builtins, '_injectedConsole_CONFIG', _injectedConsole_CONFIG)
 setattr(builtins, '_injectedConsole_PATH', _injectedConsole_PATH)
-setattr(builtins, '_injectedConsole_STARTUP', _injectedConsole_STARTUP)
 
 sys.path.insert(0, _injectedConsole_PATH['sigil_package_dir'])
 os.chdir(_injectedConsole_PATH['outdir'])
 
 from plugin_help import function
-
-os.chdir(_injectedConsole_PATH['outdir'])
 
 shell: str = args.shell
 if shell == 'nbterm':
@@ -49,13 +46,5 @@ elif shell == 'jupyter notebook':
 elif shell == 'jupyter lab':
     function.start_jupyter_lab()
 else:
-    setattr(builtins, '_injectedConsole_RUNPY', True)
-    function.start_python_shell(
-        function._startup(
-            _injectedConsole_STARTUP, 
-            errors=_config['errors'],
-        ), 
-        'injectedConsole', 
-        shell, 
-    )
+    function.start_python_shell(shell)
 

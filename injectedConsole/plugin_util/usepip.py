@@ -7,7 +7,7 @@
 # https://pip.pypa.io/en/stable/
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 3)
+__version__ = (0, 0, 4)
 
 import platform
 import subprocess
@@ -22,7 +22,8 @@ from urllib.request import urlopen
 
 
 __all__ = ['check_pip', 'install_pip_by_ensurepip', 'install_pip_by_getpip', 
-           'install_pip', 'execute_pip', 'install', 'uninstall', 'ensure_import']
+           'install_pip', 'execute_pip', 'install', 'uninstall', 'check_install', 
+           'check_uninstall', 'ensure_import', ]
 
 
 # When using subprocess.run on Windows, you should specify shell=True
@@ -179,21 +180,45 @@ def uninstall(
     execute_pip(['uninstall', *other_args, package, *other_packages])
 
 
-def ensure_import(
+def check_install(
     module: str, 
     depencies: Union[None, str, Iterable[str]]= None,
-) -> ModuleType:
-    '''Import the `module`, if it does not exist, try to install the `depencies`, 
-    and then import it again.'''
+) -> None:
+    'Import the `module`, if it does not exist, try to install the `depencies`'
     try:
-        return __import__(module)
+        __import__(module)
     except ModuleNotFoundError:
         if depencies is None:
             depencies = module,
         elif isinstance(depencies, str):
             depencies = depencies,
         install(*depencies)
-        return __import__(module)
+
+
+def check_uninstall(
+    module: str, 
+    depencies: Union[None, str, Iterable[str]]= None,
+) -> None:
+    'Import the `module`, if it exists, try to uninstall the `depencies`'
+    try:
+        __import__(module)
+        if depencies is None:
+            depencies = module,
+        elif isinstance(depencies, str):
+            depencies = depencies,
+        uninstall(*depencies)
+    except ModuleNotFoundError:
+        pass
+
+
+def ensure_import(
+    module: str, 
+    depencies: Union[None, str, Iterable[str]]= None,
+) -> ModuleType:
+    '''Import the `module`, if it does not exist, try to install the `depencies`, 
+    and then import it again.'''
+    check_install(module, depencies)
+    return __import__(module)
 
 
 check_pip()

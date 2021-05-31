@@ -3,11 +3,12 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 8)
-__revision__ = 0
+__revision__ = 1
 __all__ = ['run']
 
 import builtins
 import json
+import pickle
 import sys
 
 from contextlib import contextmanager
@@ -15,6 +16,7 @@ from os import chdir, path, remove, symlink
 from typing import Final, Optional, Tuple
 from types import MappingProxyType
 
+from plugin_util.run import run_in_process
 from plugin_util.xml_tkinter import TkinterXMLConfigParser
 
 
@@ -67,39 +69,22 @@ def get_config_tui() -> dict:
     raise NotImplementedError
 
 
-def _get_config_gui(pipe=None) -> dict:
-    with _ctx_conifg() as config:
-        config.setdefault('shell', SHELLS[0])
-        config.setdefault('errors', 'ignore')
-        config.setdefault('startup', [])
-
-        tkapp = TkinterXMLConfigParser(
-            path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), 
-            {'config': config, 'SHELLS': SHELLS}
-        )
-        tkapp.start()
-
-        if pipe:
-            pipe.send(config)
-        return config
-
-
 def get_config_gui(new_process: bool = True) -> dict:
     if new_process:
-        import multiprocessing
-
-        main_end, sub_end = multiprocessing.Pipe(duplex=False)
-        try:
-            p = multiprocessing.Process(
-                target=_get_config_gui, args=(sub_end,))
-            p.start()
-            p.join()
-            return main_end.recv()
-        finally:
-            main_end.close()
-            sub_end.close()
+        return run_in_process(get_config_gui, False)
     else:
-        return _get_config_gui()
+        with _ctx_conifg() as config:
+            config.setdefault('shell', SHELLS[0])
+            config.setdefault('errors', 'ignore')
+            config.setdefault('startup', [])
+
+            tkapp = TkinterXMLConfigParser(
+                path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), 
+                {'config': config, 'SHELLS': SHELLS}
+            )
+            tkapp.start()
+
+            return config
 
 
 def run(bc) -> Optional[int]:
@@ -117,15 +102,16 @@ def run(bc) -> Optional[int]:
         ebook_root        = ebook_root,
         outdir            = outdir,
     )
-
-    abortfile = path.join(outdir, 'abort.exists')
-    envfile = path.join(outdir, 'env.py')
-    envfile_link = path.expanduser('~/env.py')
-    argsfile = path.join(outdir, 'args.pkl')
-    mainfile = path.join(this_plugin_dir, 'main.py')
+    config['path'] = pathes
 
     setattr(builtins, '_injectedConsole_PATH', MappingProxyType(pathes))
-    setattr(builtins, '_injectedConsole_STARTUP', tuple(config['startup']))
+    setattr(builtins, '_injectedConsole_CONFIG', config)
+
+    abortfile    = path.join(outdir, 'abort.exists')
+    envfile      = path.join(outdir, 'env.py')
+    envfile_link = path.expanduser('~/env.py')
+    argsfile     = path.join(outdir, 'args.pkl')
+    mainfile     = path.join(this_plugin_dir, 'main.py')
 
     from plugin_help import function
 
@@ -145,8 +131,8 @@ if getattr(__builtins, '_injectedConsole_RUNPY', False):
 else:
     # Injecting builtins variable: _injectedConsole_PATH
     __builtins._injectedConsole_PATH = __import__('types').MappingProxyType({pathes!r})
-    # Injecting builtins variable: _injectedConsole_STARTUP
-    __builtins._injectedConsole_STARTUP = {tuple(config['startup'])!r}
+    # Injecting builtins variable: _injectedConsole_CONFIG
+    __builtins._injectedConsole_CONFIG = __import__('pickle').loads({pickle.dumps(config)!r})
 
     # Injecting module pathes
     __sys_path = __import__('sys').path
@@ -166,11 +152,7 @@ else:
     __import__('atexit').register(plugin.dump_wrapper)
 
     # Perform startup scripts
-    plugin.function._startup(
-        _injectedConsole_STARTUP, 
-        globals(), 
-        r'{config['errors']}', 
-    )
+    plugin.function._startup(globals())
 
     # Execution success information
     print("""
@@ -182,8 +164,14 @@ else:
 del __builtins
 ''')
 
-    _rm(envfile_link)
-    symlink(envfile, envfile_link)
+    try:
+        _rm(envfile_link)
+        symlink(envfile, envfile_link)
+    except:
+        __import__('traceback').print_exc()
+        print('WARNING:', 'Failed to create a link to %r on your home directory'
+              ', this may cause some applications (e.g. spyder) unable '
+              'to load the environment.' % envfile_link)
 
     chdir(outdir)
 
@@ -196,14 +184,7 @@ del __builtins
         else:
             from plugin_util.terminal import start_terminal
 
-            __import__('pickle').dump(
-                {
-                    'path': pathes, 
-                    'startup': tuple(config['startup']), 
-                    'errors': config['errors'], 
-                }, 
-                open(argsfile, 'wb'), 
-            )
+            pickle.dump(config, open(argsfile, 'wb'))
             start_terminal([
                 sys.executable, mainfile, 
                 '--args', argsfile, 

@@ -10,6 +10,7 @@ __all__ = ['TkinterXMLConfigParser']
 #    - [Tk tutorial](https://tk-tutorial.readthedocs.io/en/latest/)
 #    - [Tk Docs](https://tkdocs.com/)
 #    - [Python - GUI Programming (Tkinter)](https://www.tutorialspoint.com/python/python_gui_programming.htm)
+#    - [Python Course - Python Tkinter](https://www.python-course.eu/python_tkinter.php)
 
 import tkinter
 from tkinter import ttk
@@ -34,21 +35,21 @@ except ImportError:
 PathType = Union[bytes, str, PathLike]
 
 TOKEN_SPECIFICATION: Final[List[Tuple[str, str]]] = [
-    ('WS',        r'\s+'),
-    ('FLOAT',     r'[+-]?[0-9]+\.[0-9]*|\.[0-9]+'),
-    ('INT',       r'[+-]?[0-9]+'),
-    ('COMMA',     r','),
-    ('STRING',    r'\'(?:[^\']|(?<=\\)\')*\'|"(?:[^"]|(?<=\\)")*"'),
-    ('NAME',      r'\w+'),
-    ('ASSIGN',    r'='),
-    ('!EVAL',     r'\(\[(?P<EVAL>.*?)\]\)'),
-    ('!EVAL2',     r'\(@(?P<EVAL2>.*?)@\)'),
-    ('!EXEC',     r'\(\((?P<EXEC>.*?)\)\)'),
-    ('!EXEC2',     r'\(#(?P<EXEC2>.*?)#\)'),
-    ('!LAMBDA',   r'\(\{(?P<LAMBDA>.*?)\}\)'),
-    ('!LAMBDA2',   r'\($(?P<LAMBDA2>.*?)$\)'),
-    ('MAYBEARG',  r'[^,]+'),
-    ('MISMATCH',  r'.'),
+    ('WS',       r'\s+'),
+    ('FLOAT',    r'[+-]?[0-9]+\.[0-9]*|\.[0-9]+'),
+    ('INT',      r'[+-]?[0-9]+'),
+    ('COMMA',    r','),
+    ('STRING',   r'\'(?:[^\']|(?<=\\)\')*\'|"(?:[^"]|(?<=\\)")*"'),
+    ('NAME',     r'\w+'),
+    ('ASSIGN',   r'='),
+    ('!EVAL',    r'\(\[(?P<EVAL>.*?\]*)\]\)'),
+    ('!EVAL2',   r'\(@(?P<EVAL2>.*?)@\)'),
+    ('!EXEC',    r'\(\((?P<EXEC>.*?\)*)\)\)'),
+    ('!EXEC2',   r'\(#(?P<EXEC2>.*?)#\)'),
+    ('!LAMBDA',  r'\(\{(?P<LAMBDA>.*?\}*)\}\)'),
+    ('!LAMBDA2', r'\($(?P<LAMBDA2>.*?)$\)'),
+    ('MAYBEARG', r'[^,]+'),
+    ('MISMATCH', r'.'),
 ]
 
 
@@ -247,7 +248,12 @@ def parse_args(
 def script_removeprefix(script: str, _cre=re_compile('^[ \t]*')):
     rl = [r for r in script.splitlines() if r.strip()]
     ws_prefix = min(_cre.match(r)[0] for r in rl)
-    return '\n'.join(r.removeprefix(ws_prefix) for r in rl)
+    try:
+        removeprefix = str.removeprefix
+    except AttributeError:
+        # Adapting to Python 3.8 or lower
+        removeprefix = lambda s, p, /: s[len(p):] if s.startswith(p) else s
+    return '\n'.join(removeprefix(r, ws_prefix) for r in rl)
 
 
 class TkinterXMLConfigParser:
@@ -297,9 +303,16 @@ class TkinterXMLConfigParser:
         return MappingProxyType(self._pairs)
 
     def getitem_for_tagname(self, tagname: str):
-        if not all(s.isidentifier() for s in tagname.split('.')):
+        tagname = tagname.strip()
+        if not tagname:
+            raise ValueError('Empty tagname')
+
+        l_sep = tagname.strip().split('.')
+        if not all(s.isidentifier() for s in l_sep):
             raise ValueError(
-                'Invalid (A part not a identifier was detected) tagname %r' %tagname)
+                'Invalid (A part of the tagname is not a identifier '
+                'was detected) tagname %r' %tagname)
+
         modm, _, funm = tagname.rpartition('.')
         if modm == '':
             modm = 'tkinter'
@@ -308,10 +321,15 @@ class TkinterXMLConfigParser:
 
         try:
             mod = import_module(modm)
-        except ImportError as exc:
-            raise ValueError(
-                'Unavailable prefix %r of tagname %r' %(modm, tagname)
-            ) from exc
+        except ImportError:
+            try:
+                s, *rest_seps = l_sep
+                obj = self.namespace[s]
+                for s in rest_seps:
+                    obj = getattr(obj, s)
+                return obj
+            except (KeyError, AttributeError):
+                raise ValueError('Cannot find item for tagname %r' %tagname)
 
         try:
             return getattr(mod, funm.title())
@@ -323,8 +341,7 @@ class TkinterXMLConfigParser:
                     return self.namespace[funm]
                 except KeyError:
                     raise ValueError(
-                        'Cannot find item for tagname %r' %tagname
-                    )
+                        'Cannot find item for tagname %r' %tagname)
 
     def parse_element(
         self, 

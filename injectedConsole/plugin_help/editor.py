@@ -10,7 +10,7 @@ __all__ = [
     'xml_fromstring', 'xml_tostring', 'html_fromstring', 'html_tostring', 
     'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
     'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 
-    'EnumSelectorType', 'element_iter', 'EditStack', 'TextEtreeEditStack', 
+    'EnumSelectorType', 'element_iter', 'EditStack', 'TextEditStack', 
 ]
 
 import sys
@@ -926,6 +926,19 @@ def element_iter(
 
 
 class EditStack(Mapping[str, T]):
+    '''Initialize an editing stack that can proxy accessing to 
+    `bookcontainer.Bookcontainer` object.
+    The results of the editing stack are not immediately written back to the 
+    `bookcontainer.Bookcontainer` object, until the `__exit__` or `clear` 
+    methods are called, and then the editing stack is cleared.
+
+    Note: This can operate all the files declared in the OPF file in ePub.
+
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    '''
 
     __context_factory__: Callable[[BookContainer, str], ContextManager] = \
         lambda bc, fid: ctx_edit(fid, bc, wrap_me=True)
@@ -943,16 +956,22 @@ class EditStack(Mapping[str, T]):
 
     @property
     def data(self) -> MappingProxyType:
+        'A dictionary as a set of file id: file data object pairs.'
         return MappingProxyType(self._data)
 
     def __len__(self) -> int:
+        'Count of all available file id(s).'
         return len(self._bc._w.id_to_mime)
 
     def __iter__(self) -> Iterator[str]:
+        '''Iterate over all available file id(s) 
+        (from `bookcontainer.Bookcontainer.manifest_iter`)'''
         for fid, *_ in self._bc.manifest_iter():
             yield fid
 
     def iteritems(self) -> Iterator[Tuple[str, T]]:
+        '''Iterate over all files, and yield a tuple of file id and file 
+        data object (this will cause the file to be opened) at each time'''
         for fid in self:
             yield fid, self[fid]
 
@@ -960,15 +979,19 @@ class EditStack(Mapping[str, T]):
         return self
 
     def __exit__(self, *exc_info) -> None:
+        'Write all opened files back, and clear the editing stack.'
         self._data.clear()
         self._edit_stack.__exit__(*exc_info)
 
     def clear(self) -> None:
+        'Write all opened files back, and clear the editing stack.'
         self.__exit__(*sys.exc_info())
 
     __del__ = clear
 
     def __getitem__(self, fid) -> T:
+        '''Receive a file's manifest id, return the contents of the file, 
+        otherwise raise KeyError'''
         d = self._data
         if fid not in d:
             try:
@@ -992,8 +1015,8 @@ class EditStack(Mapping[str, T]):
             raise KeyError(key) from exc
 
     def read_basename(self, key) -> T:
-        '''Receive a file's basename (with extension), return the contents of the file, 
-        otherwise raise KeyError'''
+        '''Receive a file's basename (with extension), return the 
+        contents of the file, otherwise raise KeyError'''
         try:
             return self[self._bc.basename_to_id(key)]
         except Exception as exc:
@@ -1008,11 +1031,31 @@ class EditStack(Mapping[str, T]):
             raise KeyError(key) from exc
 
 
-class TextEtreeEditStack(EditStack[T]):
+class TextEditStack(EditStack[T]):
+    '''Initialize an editing stack that can proxy accessing to 
+    `bookcontainer.Bookcontainer` object.
+    The results of the editing stack are not immediately written back to the 
+    `bookcontainer.Bookcontainer` object, until the `__exit__` or `clear` 
+    methods are called, and then the editing stack is cleared.
+
+    Note: This can operate all the text (HTML / XHTML only) files 
+          declared in the OPF file in ePub.
+
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    '''
 
     __context_factory__ = ctx_edit_html
 
+    def __len__(self) -> int:
+        'Count of all available file id(s) (HTML / XHTML only).'
+        return sum(1 for _ in self._bc.text_iter())
+
     def __iter__(self) -> Iterator[str]:
+        '''Iterate over all available file id(s)
+        (from `bookcontainer.Bookcontainer.text_iter`)'''
         for fid, *_ in self._bc.text_iter():
             yield fid
 
