@@ -11,6 +11,7 @@ __all__ = [
 ]
 
 import builtins
+import re
 import subprocess
 import sys
 
@@ -192,14 +193,21 @@ def run_env(forcible_execution: bool = False, /) -> None:
 def load_script(
     path: str, 
     globals: Optional[dict] = None, 
-    include_prefix_underline: bool = False, 
+    include_single: bool = False, 
+    include__dunder: bool = False, 
+    include__special__: bool = False, 
+    _cre=re.compile('^(?P<special>__.+__)|(?P<dunder>__.*)|(?P<single>_.*)|(?P<normal>.*)$', re.S | re.U), 
 ) -> Optional[dict]:
     '''To execute or register some script.
 
     :param path: Path of a script (a file or folder).
     :param globals: The global namespace used to execute the script.
-    :param include_prefix_underline: 
-        Determine whether to include these key-value pairs that their keys are prefixed with _.
+    :param include_single: 
+        Determine whether to include these key-value pairs that their keys are like _var.
+    :param include__dunder: 
+        Determine whether to include these key-value pairs that their keys are like __var.
+    :param include__special__: 
+        Determine whether to include these key-value pairs that their keys are like __var__.
 
     :return: `dict` (that is for updating) means that the script has been executed, 
              `None` means that the script (as a package) has been appended to `sys.path`.
@@ -209,7 +217,8 @@ def load_script(
            with __main__.py, will be executed directly.
         2. A folder (or .zip file) without __main__.py will be appended to sys.path.
     Tips: In the result dictionary of the script (result is the return value of `runpy.run_path`), 
-          all the key-value pairs, their keys are not prefixed with _, were updated to `globals`.
+          all the key-value pairs, their keys are not excluded and their values are different from 
+          those of the same key in `globals`, were updated to `globals`.
     '''
     if not _path.exists(path):
         raise FileNotFoundError('No such file or directory: %r' % path)
@@ -227,18 +236,23 @@ def load_script(
     if globals is None:
         globals = sys._getframe(1).f_globals
 
-    ret: dict = cast(dict, run_path(path, globals, '__main__'))
+    def check_group(name):
+        group = _cre.fullmatch(name).lastgroup
+        if group == 'single':
+            return include_single
+        elif group == 'dunder':
+            return include__dunder
+        elif group == 'special':
+            return include__special__
+        else:
+            return True
+
     sentinel = object()
-    if include_prefix_underline:
-        updating_dict: dict = {
-            k: v for k, v in ret.items() 
-            if v is not globals.get(k, sentinel)
-        }
-    else:
-        updating_dict: dict = {
-            k: v for k, v in ret.items() 
-            if not k.startswith('_') and v is not globals.get(k, sentinel)
-        }
+    ret: dict = cast(dict, run_path(path, globals, '__main__'))
+    updating_dict: dict = {
+        k: v for k, v in ret.items() 
+        if check_group(k) and v is not globals.get(k, sentinel)
+    }
     globals.update(updating_dict)
     return updating_dict
 
@@ -295,10 +309,10 @@ def _startup(
 
     if keys_updated:
         print('The following keys had been updated\n\t|_', tuple(keys_updated))
-        keys_updated_bu_removed = keys_updated - namespace.keys()
-        if keys_updated_bu_removed:
+        keys_updated_but_removed = keys_updated - namespace.keys()
+        if keys_updated_but_removed:
             print('But these keys were eventually removed\n\t|_', 
-                  tuple(keys_updated_bu_removed))
+                  tuple(keys_updated_but_removed))
 
     return namespace
 

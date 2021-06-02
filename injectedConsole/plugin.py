@@ -12,6 +12,7 @@ import pickle
 import sys
 
 from contextlib import contextmanager
+from copy import deepcopy
 from os import chdir, path, remove, symlink
 from typing import Final, Optional, Tuple
 from types import MappingProxyType
@@ -49,16 +50,15 @@ def _rm(path) -> bool:
 @contextmanager
 def _ctx_conifg():
     try:
-        config = json.load(open(CONFIG_JSON_FILE, encoding='utf-8'))
+        old_config = json.load(open(CONFIG_JSON_FILE, encoding='utf-8'))
     except (FileNotFoundError, json.JSONDecodeError):
-        config = {}
+        old_config = {}
 
-    old_config = config.copy()
-
+    config = deepcopy(old_config)
     yield config
 
     if old_config != config:
-        json.dump(config, open(CONFIG_JSON_FILE, 'w', encoding='utf-8'))
+        json.dump(config, open(CONFIG_JSON_FILE, 'w', encoding='utf-8'), ensure_ascii=False)
 
 
 def get_config_webui() -> dict:
@@ -74,9 +74,10 @@ def get_config_gui(new_process: bool = True) -> dict:
         return run_in_process(get_config_gui, False)
     else:
         with _ctx_conifg() as config:
-            config.setdefault('shell', SHELLS[0])
-            config.setdefault('errors', 'ignore')
-            config.setdefault('startup', [])
+            if 'config' not in config:
+                config['config'] = {'shell': SHELLS[0], 'errors': 'ignore', 'startup': []}
+            if 'configs' not in config:
+                config['configs'] = []
 
             tkapp = TkinterXMLConfigParser(
                 path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), 
@@ -88,7 +89,7 @@ def get_config_gui(new_process: bool = True) -> dict:
 
 
 def run(bc) -> Optional[int]:
-    config = get_config_gui()
+    config = get_config_gui().get('config', {})
 
     laucher_file, ebook_root, outdir, _, target_file = sys.argv
     this_plugin_dir = path.dirname(target_file)

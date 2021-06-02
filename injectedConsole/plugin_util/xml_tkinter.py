@@ -2,7 +2,7 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
+__version__ = (0, 0, 2)
 __all__ = ['TkinterXMLConfigParser']
 
 # Reference:
@@ -16,6 +16,7 @@ import tkinter
 from tkinter import ttk
 
 from collections import ChainMap
+from copy import copy
 from functools import cached_property, partial
 from importlib import import_module
 from os import PathLike
@@ -23,8 +24,9 @@ from re import compile as re_compile, Match, Pattern
 from types import MappingProxyType, ModuleType
 from typing import (
     cast, Callable, Container, Dict, Final, Generator, Iterable, 
-    List, Mapping, NamedTuple, Optional, Tuple, Union, 
+    List, Mapping, MutableMapping, NamedTuple, Optional, Tuple, Union, 
 )
+from weakref import WeakValueDictionary
 
 try:
     from lxml.etree import fromstring # type: ignore
@@ -132,7 +134,7 @@ def tokenize_args(
         if curr is None:
             return
         if prev.group == 'ASSIGN':
-            raise SyntaxError('Keyword argument %s has no value' % key.value)
+            raise SyntaxError('There is no value to assign')
         if key is None:
             if val is None:
                 return True
@@ -143,9 +145,8 @@ def tokenize_args(
             pargs.append(val)
         else:
             if val is None:
-                raise SyntaxError('haha')
+                raise SyntaxError('Keyword argument %s has no value' % key.value)
             if key.value in kargs:
-                print(key.value)
                 raise SyntaxError('Keyword argument repeated %s' % key.value)
             kargs[key.value] = val
             key = val = None
@@ -201,6 +202,12 @@ def parse_arg_token(
         return float(value)
     elif group == 'STRING':
         return value[1:-1]
+    elif group == 'NAME':
+        if value in ('true', 'True'):
+            return True
+        elif value in ('false', 'False'):
+            return False
+        return value
     elif group in ('EVAL', 'EVAL2'):
         return eval(value, globals, locals) if value.strip() else None
     elif group in ('EXEC', 'EXEC2'):
@@ -265,25 +272,27 @@ class TkinterXMLConfigParser:
         parser=None, 
         set_name_to_namespace: bool = False, 
     ) -> None:
+        self._text: str = open(path).read()
+        self._root = fromstring(self._text, parser)
+
         if namespace is None:
             namespace = {}
         self.namespace = namespace
         self.set_name_to_namespace = set_name_to_namespace
+        self._namemap: dict = WeakValueDictionary()
+        self._pairs: dict = {}
 
-        self._namemap: dict = {}
         namespace.update(
             __name__='__main__', 
             __file__=path.decode() if isinstance(path, bytes) else str(path), 
             __self__=self, 
-            namemap=MappingProxyType(self._namemap), 
+            __root__=self._root, 
+            namemap=self._namemap, 
             tkinter=tkinter, 
             tk=tkinter, 
             ttk=ttk, 
         )
 
-        self._text: str = open(path).read()
-        self._pairs: dict = {}
-        self._root = fromstring(self._text, parser)
         self._tk = self.parse_element(self._root)
 
     @property
@@ -343,24 +352,25 @@ class TkinterXMLConfigParser:
                     raise ValueError(
                         'Cannot find item for tagname %r' %tagname)
 
-    def parse_element(
+    def parse_initargs(
         self, 
         el, 
-        parent=None,
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
     ):
-        if parent is None and el.tag not in ('tk', 'Tk'):
-            raise ValueError(
-                "The tag name of top level element must be"
-                " 'tk' or 'Tk', got %r" %el.tag)
+        if globals is None:
+            globals: dict = self.namespace
+        if locals is None:
+            extras: dict = {
+                'el_text': el.text, 
+                'el_tail': el.tail, 
+                '__parent__': parent, 
+            }
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
 
-        widget_factory = self.getitem_for_tagname(el.tag)
-        if widget_factory is None:
-            return
-
-        el_attrib = el.attrib
-        extras = {'text': el.text or ''}
-        globals = self.namespace
-        locals: ChainMap  = ChainMap(self.namespace, self._namemap, extras)
+        el_attrib: MutableMapping = el.attrib
 
         script_str = el_attrib.get('script-', '')
         if script_str.strip():
@@ -368,7 +378,8 @@ class TkinterXMLConfigParser:
 
         for k, v in el_attrib.items():
             if k.startswith('_'):
-                parse_arg(v)
+                ret = parse_arg(v, globals, locals)
+                el_attrib[k] = v if ret is None else ret
 
         args_str = el_attrib.get('init-')
         if args_str is None:
@@ -384,23 +395,39 @@ class TkinterXMLConfigParser:
                 and k not in ('id', 'class', 'name')
         )
 
-        if parent is None:
-            self._pairs[el] = widget = widget_factory(*pargs, **kargs)
-            self.namespace.setdefault('app', widget)
-        else:
-            self._pairs[el] = widget = widget_factory(parent, *pargs, **kargs)
-            try:
-                widget.pack()
-            except:
-                pass
+        return pargs, kargs
 
-        extras['self'] = widget
+    def parse_special_attrs(
+        self, 
+        el, 
+        widget,
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
+    ):
+        if globals is None:
+            globals: dict = self.namespace
+        if locals is None:
+            extras: dict = {
+                'el_text': el.text, 
+                'el_tail': el.tail, 
+                '__self__': widget, 
+                '__parent__': parent, 
+            }
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
+
+        el_attrib: MutableMapping = el.attrib
 
         name = el_attrib.get('name', '')
         if name:
-            self._namemap[name] = widget
+            namemap = globals.get('namemap', self._namemap)
+            namemap[name] = widget
             if self.set_name_to_namespace:
                 self.namespace[name] = widget
+
+        if 'data-' in el_attrib:
+            setattr(widget, '$data', parse_arg(el_attrib['data-'], globals, locals))
 
         for attr, args_str in el_attrib.items():
             asw = attr.startswith
@@ -415,47 +442,176 @@ class TkinterXMLConfigParser:
                 pargs_, kargs_ = parse_args(args_str, globals, locals)
                 method(*pargs_, **kargs_)
 
+    def parse_element(
+        self, 
+        el, 
+        parent=None, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
+    ):
+        el_tag = el.tag
+        if el_tag == 'script':
+            return self.parse_element_script(el, parent, globals, locals)
+
+        widget_factory = self.getitem_for_tagname(el_tag)
+        if widget_factory is None:
+            return
+
+        if globals is None:
+            globals = self.namespace
+        if locals is None:
+            extras: dict = {
+                'el_text': el.text, 
+                'el_tail': el.tail, 
+                '__parent__': parent, 
+            }
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
+
+        if isinstance(widget_factory, type):
+            if parent is None and not issubclass(widget_factory, tkinter.Tk):
+                raise ValueError(
+                    "The tag name of top level element must be"
+                    " 'tk' or 'Tk', got %r" %el_tag)
+            elif issubclass(widget_factory, tkinter.Toplevel):
+                return self.parse_element_toplevel(
+                    el, parent, globals, cls=widget_factory)
+
+        pargs, kargs = self.parse_initargs(el, parent, globals, locals)
+
+        if isinstance(widget_factory, type) and issubclass(widget_factory, tkinter.Menu):
+            if parent is None:
+                raise ValueError('%r cannot be the top level element' %el_tag)
+            label = kargs.pop('label', 'Menu')
+            widget = widget_factory(parent, *pargs, **kargs)
+            if isinstance(parent, tkinter.Menu):
+                parent.add_cascade(label=label, menu=widget)
+            else:
+                parent.config(menu=widget)
+        elif parent is None:
+            widget = widget_factory(*pargs, **kargs)
+            self.namespace.setdefault('__app__', widget)
+        else:
+            widget = widget_factory(parent, *pargs, **kargs)
+            try:
+                widget.pack()
+            except:
+                pass
+
+        self._pairs[el] = widget
+        locals = ChainMap(locals, {'__self__': widget})
+        self.parse_special_attrs(el, widget, parent, globals, locals)
+
         for child in el:
             ctag = child.tag
             if ctag == 'property':
-                self.parse_element_property(child, widget)
+                self.parse_element_property(child, widget, globals, locals)
             elif ctag == 'method':
-                self.parse_element_method(child, widget)
+                self.parse_element_method(child, widget, globals, locals)
             elif ctag.startswith(('m-', 'method-')):
-                self.parse_element_method_call(child, widget)
-            elif ctag == 'script':
-                self.parse_element_script(child, widget)
+                self.parse_element_method_call(child, widget, globals, locals)
             else:
-                self.parse_element(child, widget)
+                self.parse_element(child, widget, globals)
 
         return widget
 
-    def parse_element_property(self, el, parent):
+    def parse_element_toplevel(
+        self, 
+        el, 
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
+        cls=None, 
+    ):
+        if cls is None:
+            cls = tkinter.Toplevel
+        _globals, _locals = globals, locals
+        if _globals is None:
+            _globals = self.namespace
+        def call():
+            globals = copy(_globals)
+
+            if _locals is None:
+                extras: dict = {
+                    'el_text': el.text, 
+                    'el_tail': el.tail, 
+                    '__parent__': parent, 
+                }
+                locals = ChainMap(
+                    globals, globals.get('namemap', self._namemap), extras)
+            else:
+                locals = ChainMap(globals, _locals)
+
+            pargs, kargs = self.parse_initargs(el, parent, globals, locals)
+
+            self._pairs[el] = widget = cls(*pargs, **kargs)
+            locals = ChainMap(locals, {'__self__': widget})
+
+            el_attrib: MutableMapping = el.attrib
+            data = el_attrib.get('data-')
+            if data is not None:
+                setattr(widget, '$data', parse_arg(data))
+
+            self.parse_special_attrs(el, widget, parent, globals, locals)
+
+            for child in el:
+                self.parse_element(child, widget, globals)
+
+            parent.wait_window(widget)
+            return getattr(widget, '$data', None)
+
+        name = el.attrib.get('name', '')
+        if name:
+            _globals[name] = call
+            return call
+        else:
+            return call()
+
+    def parse_element_property(
+        self, 
+        el, 
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None,
+    ):
         if el.tag != 'property':
             raise ValueError('Invalid tag name %r for <property>' %el.tag)
 
-        globals = self.namespace
-        locals  = ChainMap(self.namespace, self._namemap, {'self': parent})
+        if globals is None:
+            globals = self.namespace
+        if locals is None:
+            extras: dict = {'el_text': el.text, 'el_tail': el.tail, '__self__': parent}
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
 
         for k, v in el.attrib.items():
             parent[k] = parse_arg(v, globals, locals)
 
-    def parse_element_method(self, el, parent):
-        'namespace'
+    def parse_element_method(
+        self, 
+        el, 
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
+    ):
         el_tag, el_attrib = el.tag, el.attrib
         if el_tag != 'method':
             raise ValueError('Invalid tag name %r for <method>' %el_tag)
 
-        globals = self.namespace
-        locals  = ChainMap(
-            self.namespace, 
-            self._namemap, 
-            {
-                k: parse_arg(v, globals, locals)
+        if globals is None:
+            globals = self.namespace
+        if locals is None:
+            extras: dict = {
+                'el_text': el.text, 
+                'el_tail': el.tail, 
+                '__self__': parent, 
+            }
+            extras.update(
+                (k, parse_arg(v, globals, locals))
                 for k, v in el_attrib.items()
-            }, 
-            {'self': parent}, 
-        )
+            )
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
 
         for child in el:
             m_name = child.tag
@@ -483,7 +639,13 @@ class TkinterXMLConfigParser:
 
             method(*pargs, **kargs)
 
-    def parse_element_method_call(self, el, parent):
+    def parse_element_method_call(
+        self, 
+        el, 
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
+    ):
         el_tag, el_attrib = el.tag, el.attrib
         if el_tag.startswith('m-'):
             m_name = el_tag[2:]
@@ -496,8 +658,16 @@ class TkinterXMLConfigParser:
         if not callable(method):
             raise TypeError(f'{parent!r}.{m_name} must be a callable')
 
-        globals = self.namespace
-        locals  = ChainMap(self.namespace, self._namemap, {'self': parent})
+        if globals is None:
+            globals = self.namespace
+        if locals is None:
+            extras: dict = {
+                'el_text': el.text, 
+                'el_tail': el.tail, 
+                '__self__': parent, 
+            }
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
 
         args_str = el_attrib.get('args-')
         if args_str is None:
@@ -513,24 +683,34 @@ class TkinterXMLConfigParser:
 
         method(*pargs, **kargs)
 
-    def parse_element_script(self, el, parent):
+    def parse_element_script(
+        self, 
+        el, 
+        parent, 
+        globals: Optional[dict] = None, 
+        locals: Optional[Mapping] = None, 
+    ):
         script = el.text
 
         source = script_removeprefix(script)
         module_name = el.attrib.get('module')
-        if module_name is None:
+
+        if globals is None:
             globals = self.namespace
-            locals  = ChainMap(self.namespace, self._namemap, {'parent': parent})
-        else:
+        if locals is None:
+            extras: dict = {
+                'el_text': el.text, 
+                'el_tail': el.tail, 
+                '__parent__': parent, 
+            }
+            locals = ChainMap(
+                globals, globals.get('namemap', self._namemap), extras)
+
+        if module_name is not None:
             module = ModuleType(module_name)
-            self.namespace[module_name] = module
+            globals[module_name] = module
             globals = module.__dict__
-            locals  = ChainMap(
-                module.__dict__, 
-                self.namespace, 
-                self._namemap, 
-                {'parent': parent}, 
-            )
+            locals  = ChainMap(globals, locals)
 
         exec(source, globals, locals)
 
