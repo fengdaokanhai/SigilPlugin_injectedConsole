@@ -5,66 +5,11 @@
 
     font_bold_underline = Font(weight='bold', underline=1)
 
-    # Fork from [python - How to display tool tips in Tkinter?](https://try2explore.com/questions/10367355)
-    class Tooltip(object):
-        """
-        create a tooltip for a given widget
-        """
-        def __init__(self, widget, text='widget info'):
-            self.waittime = 500     #miliseconds
-            self.wraplength = 180   #pixels
-            self.widget = widget
-            self.text = text
-            self.widget.bind("&lt;Enter&gt;", self.enter)
-            self.widget.bind("&lt;Leave&gt;", self.leave)
-            self.widget.bind("&lt;ButtonPress&gt;", self.leave)
-            self.id = None
-            self.tw = None
-
-        def enter(self, event=None):
-            self.schedule()
-
-        def leave(self, event=None):
-            self.unschedule()
-            self.hidetip()
-
-        def schedule(self):
-            self.unschedule()
-            self.id = self.widget.after(self.waittime, self.showtip)
-
-        def unschedule(self):
-            id = self.id
-            self.id = None
-            if id:
-                self.widget.after_cancel(id)
-
-        def showtip(self, event=None):
-            x = y = 0
-            x, y, cx, cy = self.widget.bbox("insert")
-            x += self.widget.winfo_rootx() + 25
-            y += self.widget.winfo_rooty() + 20
-            # creates a toplevel window
-            self.tw = tk.Toplevel(self.widget)
-            # Leaves only the label and removes the app window
-            self.tw.wm_overrideredirect(True)
-            self.tw.wm_geometry("+%d+%d" % (x, y))
-            label = tk.Label(self.tw, text=self.text, justify='left',
-                        background="#ffffff", relief='solid', borderwidth=1,
-                        wraplength = self.wraplength)
-            label.pack(ipadx=1)
-
-        def hidetip(self):
-            tw = self.tw
-            self.tw= None
-            if tw:
-                tw.destroy()
-
     def set_config(config):
         namemap['cb_selsh']['values'] = SHELLS
         namemap['cb_selsh'].current(SHELLS.index(config['shell']))
         namemap['startup_errors'].set(config['errors'])
-        namemap['lb'].delete(0, tk.END)
-        namemap['lb'].insert(0, *config['startup'])
+        namemap['lb'].replace(config['startup'])
 
     def ask_save_config_dialog():
         val = ask_save_config()
@@ -91,57 +36,28 @@
 
     def click_add_file():
         filenames = filedialog.askopenfilenames()
-        con = config['config']['startup']
         if filenames:
             namemap['lb'].insert(tk.END, *filenames)
-            con.extend(filenames)
 
     def click_add_dir():
         directory = filedialog.askdirectory()
-        con = config['config']['startup']
         if directory:
             namemap['lb'].insert(tk.END, directory)
-            con.append(directory)
 
     def click_del_sel():
         sels = namemap['lb'].curselection()
         if sels:
-            con = config['config']['startup']
             for sel in reversed(sels):
                 namemap['lb'].delete(sel)
-                del con[sel]
 
     def click_clear():
         namemap['lb'].delete(0, tk.END)
-        config['config']['startup'].clear()
 
     def click_move_up():
-        lb = namemap['lb']
-        sels = lb.curselection()
-        if sels:
-            con = config['config']['startup']
-            insert_pos = max(0, min(sels) - 1)
-            items = [con[p] for p in sels]
-            for sel in reversed(sels):
-                lb.delete(sel)
-                del con[sel]
-            lb.insert(insert_pos, *items)
-            con[insert_pos:insert_pos] = items
-            lb.select_set(insert_pos, insert_pos + len(items) - 1)
+        namemap['lb'].onKeyUp()
 
     def click_move_down():
-        lb = namemap['lb']
-        sels = lb.curselection()
-        if sels:
-            con = config['config']['startup']
-            insert_pos = min(len(con) - len(sels), min(sels) + 1)
-            items = [con[p] for p in sels]
-            for sel in reversed(sels):
-                lb.delete(sel)
-                del con[sel]
-            lb.insert(insert_pos, *items)
-            con[insert_pos:insert_pos] = items
-            lb.select_set(insert_pos, insert_pos + len(items) - 1)
+        namemap['lb'].onKeyDown()
 
     try:
         def startfile(path, _start=__import__('os').startfile):
@@ -184,11 +100,12 @@
     <toplevel name="ask_load_config">
         <script type="text/python">
         def lb_dbclick(event):
-            target = namemap['ask_load_config']
-            selected = event.widget.curselection()[0]
-            config['config'] = config['configs'][selected][1].copy()
-            set_config(config['config'])
-            namemap['ask_load_config'].destroy()
+            sels = event.widget.curselection()
+            if sels:
+                selected = sels[0]
+                config['config'] = config['configs'][selected][1].copy()
+                set_config(config['config'])
+                namemap['ask_load_config'].destroy()
 
         def btn_click_del_lb_sel():
             target = namemap['lb2']
@@ -196,58 +113,41 @@
             if sels:
                 for sel in reversed(sels):
                     target.delete(sel)
-                    del config['configs'][sel]
 
         def btn_click_lb_clear():
             target = namemap['lb2']
             target.delete(0, tk.END)
-            config['configs'].clear()
 
         def click_move_up():
-            lb = namemap['lb2']
-            sels = lb.curselection()
-            if sels:
-                con = config['configs']
-                insert_pos = max(0, min(sels) - 1)
-                items = [con[p] for p in sels]
-                for sel in reversed(sels):
-                    lb.delete(sel)
-                    del con[sel]
-                lb.insert(insert_pos, *items)
-                con[insert_pos:insert_pos] = items
-                lb.select_set(insert_pos, insert_pos + len(items) - 1)
+            namemap['lb2'].onKeyUp()
 
         def click_move_down():
-            lb = namemap['lb2']
-            sels = lb.curselection()
-            if sels:
-                con = config['configs']
-                insert_pos = min(len(con) - len(sels), min(sels) + 1)
-                items = [con[p] for p in sels]
-                for sel in reversed(sels):
-                    lb.delete(sel)
-                    del con[sel]
-                lb.insert(insert_pos, *items)
-                con[insert_pos:insert_pos] = items
-                lb.select_set(insert_pos, insert_pos + len(items) - 1)
+            namemap['lb2'].onKeyDown()
          </script>
         <frame>
             <button text="Delete Selected" width="10" command="([btn_click_del_lb_sel])" m-pack="side=left" />
             <button text="Clear All" width="10" command="([btn_click_lb_clear])" m-pack="side=left" />
         </frame>
         <frame>
-            <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" />
-            <button text="⤓" width="1" command="([click_move_down])" m-pack="side=left" />
+            <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" >
+                <Tooltip text="Move selected items up" />
+            </button>
+            <button text="⤓" width="1" command="([click_move_down])" m-pack="side=left" >
+                <Tooltip text="Move selected items down" />
+            </button>
         </frame>
-        <scrollbar name="sc2" orient="vertical" m-pack="side=right,fill=y" />
-        <listbox name="lb2" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
-        <script type="text/python">
-        # TODO: TreeView, NOT Listbox 
-        lb2.config(yscrollcommand=sc2.set)
-        sc2.config(command=lb2.yview)
-        lb2.bind('&lt;Double-Button-1&gt;', lb_dbclick)
-        lb2.insert(0, *config['configs'])
-        </script>
+        <MultiListbox 
+            name="lb2" 
+            header_list="([[('Label', 10), ('Config', 40)]])"
+            data="([config['configs']])"
+            selectmode="extended"
+            borderwidth="0"
+            relief="flat"
+            exportselection="false"
+            selectborderwidth="0"
+            m-pack="side=left, fill=both, expand=true"
+            m-bind="'&lt;Double-Button-1&gt;', ([lb_dbclick])"
+        />
     </toplevel>
     <label bd="1" relief="sunken" anchor="w" m-pack="side=top,fill=x" text="close the window to take effect" bg="red" fg="yellow" font="([font_bold_underline])" />
     <label text="Select a Shell" height="2" font="([font_bold_underline])">
@@ -257,16 +157,13 @@
     <ttk.separator orient="horizontal" m-pack="fill=x" />
     <script type="text/python">
     def cb_set_shell(event):
-        print(event.widget)
-        config['config']['shell'] = namemap['cb_selsh'].get()
-        print(namemap['cb_selsh'].get())
-        print(config)
+        config['config']['shell'] = event.widget.get()
 
     cb_selsh.bind("&lt;&lt;ComboboxSelected&gt;&gt;", cb_set_shell)
     cb_selsh.bind("&lt;Return&gt;", lambda event: __app__.quit())
     </script>
     <label text="Select Some Startups" height="2" font="([font_bold_underline])">
-        <Tooltip init-="text=([el_text])" >WARNING: PLEASE CONFIRM THE SECURITY OF THE ADDED STARTUP BY YOURSELF IN ADVANCE.
+        <Tooltip args-="text=([el_text])" >WARNING: PLEASE CONFIRM THE SECURITY OF THE ADDED STARTUP BY YOURSELF IN ADVANCE.
 
 Add some scripts that will be executed or registered automatically at startup.
 
@@ -299,11 +196,15 @@ It will deal with the following situations separately:
         <button text="Clear All" width="10" command="([click_clear])" m-pack="side=left" />
     </frame>
     <frame>
-        <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" />
-        <button text="⤓" width="1" command="([click_move_down])" m-pack="side=left" />
+        <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" >
+            <Tooltip text="Move selected items up" />
+        </button>
+        <button text="⤓" width="1" command="([click_move_down])" m-pack="side=left" >
+            <Tooltip text="Move selected items down" />
+        </button>
     </frame>
-    <scrollbar name="sc" orient="vertical" m-pack="side=right,fill=y"/>
-    <listbox name="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
+    <DragDropListbox name="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
+    <scrollbar name="sc" orient="vertical" m-pack="side=left,fill=y"/>
     <script type="text/python">
     def lb_startfile(event):
         path = event.widget.get(event.widget.curselection())

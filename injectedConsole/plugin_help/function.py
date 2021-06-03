@@ -457,9 +457,9 @@ def start_nbterm(
 
 def _ensure_pyqt5():
     check_install('PyQt5.pyrcc', 'PyQt5')
+    check_install('PyQt5.QtWebEngine', ('PyQtWebEngine', 'PyQtWebEngine-Qt5'))
     check_install('PyQt5.sip', 'PyQt5-sip')
     check_install('PyQt5.Qt5', 'PyQt5-Qt5')
-    check_install('PyQt5.QtWebEngine', ('PyQtWebEngine', 'PyQtWebEngine-Qt5'))
 
 
 def start_qtconsole(

@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 8)
-__revision__ = 1
+__revision__ = 3
 __all__ = ['run']
 
 import builtins
@@ -13,6 +13,7 @@ import sys
 
 from contextlib import contextmanager
 from copy import deepcopy
+from importlib import import_module
 from os import chdir, path, remove, symlink
 from typing import Final, Optional, Tuple
 from types import MappingProxyType
@@ -47,6 +48,12 @@ def _rm(path) -> bool:
         return False
 
 
+def _import_all(mod_name):
+    mod = import_module(mod_name)
+    get = mod.__dict__.get
+    return {k: get(k) for k in mod.__all__}
+
+
 @contextmanager
 def _ctx_conifg():
     try:
@@ -78,11 +85,11 @@ def get_config_gui(new_process: bool = True) -> dict:
                 config['config'] = {'shell': SHELLS[0], 'errors': 'ignore', 'startup': []}
             if 'configs' not in config:
                 config['configs'] = []
+            namespace = _import_all('plugin_util.tkinter_extensions')
+            namespace.update(config=config, SHELLS=SHELLS)
 
             tkapp = TkinterXMLConfigParser(
-                path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), 
-                {'config': config, 'SHELLS': SHELLS}
-            )
+                path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), namespace)
             tkapp.start()
 
             return config

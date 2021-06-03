@@ -381,7 +381,7 @@ class TkinterXMLConfigParser:
                 ret = parse_arg(v, globals, locals)
                 el_attrib[k] = v if ret is None else ret
 
-        args_str = el_attrib.get('init-')
+        args_str = el_attrib.get('args-')
         if args_str is None:
             pargs, kargs = (), {}
         else:
