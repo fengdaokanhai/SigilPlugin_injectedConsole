@@ -46,7 +46,7 @@ class HTMLParser(_HTMLParser):
         returning an :class:`xml.etree.ElementTree.Element` instance. 
         The returned root element natively supports the ElementTree API.
         (e.g. you may use its limited support for `XPath expressions`)
-        [Xpath](https://docs.python.org/3.6/library/xml.etree.elementtree.html#xpath-support)
+        [XPath](https://docs.python.org/3/library/xml.etree.elementtree.html#xpath-support)
 
     When a "tag" and "tag attributes" are given, the parser will search for a required section. 
         Only when the required section is found, does the parser start parsing the "HTML document". 
@@ -372,8 +372,8 @@ def parse(
     :return: The root element of the element tree.
     :raises UnicodeDecodeError: If decoding of *source* fails.
     """
-    # Assume that source is a file pointer if no read methods is found
-    if not hasattr(source, 'read'):
+    # Assume that source is a file-like object if the 'read' methods is found
+    if hasattr(source, 'read'):
         source = cast(Union[BinaryIO, TextIO], source)
     else:
         source = cast(PathLike, source)

@@ -6,7 +6,7 @@ This module provides some functions for modifying files in the
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 1)
 __all__ = [
-    'ReMoreInfoMatch', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'make_element', 
+    'IterMatchInfo', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'make_element', 
     'make_html_element', 'xml_fromstring', 'xml_tostring', 'html_fromstring', 
     'html_tostring', 'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
     'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 'EnumSelectorType', 
@@ -54,25 +54,29 @@ _XHTML_DOCTYPE: bytes = (b'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" '
 _HTML_PARSER = HTMLParser(default_doctype=False)
 
 
-class ReMoreInfoMatch(NamedTuple):
+class IterMatchInfo(NamedTuple):
     '''Context information wrapping for regular expression matches.
 
     - bc: The ePub editor object `BookContainer`. 
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    - id: The file's manifest id (listed in the OPF file)
-    - match: The regular expression match object
+    - manifest_id: The file's manifest id (listed in the OPF file)
     - local_no: Number in the current file (from 1)
     - global_no: Number in all files (from 1)
     - file_no: Number of processed files (from 1)
+    - href: The file's OPF href 
+    - mimetype: The file's media type
+    - match: The regular expression match object
     - string: The contents of the current file
     '''
     bc: BookContainer
-    id: str
-    match: Match
+    manifest_id: str
     local_no: int
     global_no: int
     file_no: int
+    href: str
+    mimetype: str
+    match: Match
     string: Union[bytes, str]
 
 
@@ -82,7 +86,7 @@ def re_iter(
     bc: Optional[BookContainer] = None, 
     errors: str = 'ignore', 
     more_info: bool = False, 
-) -> Union[Generator[Match, None, None], Generator[ReMoreInfoMatch, None, None]]:
+) -> Union[Generator[Match, None, None], Generator[IterMatchInfo, None, None]]:
     '''Iterate over each of the files corresponding to the given `manifest_id_s` 
     with regular expressions, and yield matches one by one.
 
@@ -100,17 +104,20 @@ def re_iter(
         - raise: Ignore the error and continue processing, the number will not increase.
         - skip: Raise the error and stop processing.
     :param more_info: 
-        If false, the yielding information is the match object of the regular expression,
-        else the yielding information is a namedtuple, including the following fields:
+        If false, the yielding results are the match object of the regular expression,
+        else the yielding results are the namedtuple `IterMatchInfo` objects, 
+        including the following fields:
             - bc: The ePub editor object.
-            - id: The file's manifest id (listed in the OPF file)
-            - match: The regular expression match object
+            - manifest_id: The file's manifest id (listed in the OPF file)
             - local_no: Number in the current file (from 1)
             - global_no: Number in all files (from 1)
             - file_no: Number of processed files (from 1)
+            - href: The file's OPF href 
+            - mimetype: The file's media type
+            - match: The regular expression match object
             - string: The contents of the current file
 
-    :return: Generator, if `more_info` is True, then yield `ReMoreInfoMatch` object, 
+    :return: Generator, if `more_info` is True, then yield `IterMatchInfo` object, 
              else yield `Element` object.
     '''
     fn = re_compile(pattern).finditer
@@ -128,11 +135,14 @@ def re_iter(
         i = j = k = 1
 
         for id_ in manifest_id_s:
+            href = bc.id_to_href(id_)
+            mime = bc.id_to_mime(id_)
             try:
                 string = bc.readfile(id_)
                 i = 1
-                for match in fn(string):
-                    yield ReMoreInfoMatch(bc, id_, match, i, j, k, string)
+                for m in fn(string):
+                    yield IterMatchInfo(
+                        bc, id_, i, j, k, href, mime, m, string)
                     i += 1
                     j += 1
             except:
@@ -178,13 +188,16 @@ def re_sub(
         - skip: Raise the error and stop processing.
     :param more_info: This parameter only takes effect when `repl` is a callable.
         If false, the argument was passed to the `repl` function is the match object of the regular expression,
-        else the argument was passed to the `repl` function is a namedtuple, including the following fields:
+        else the argument was passed to the `repl` function is the namedtuple `IterMatchInfo` object, 
+        including the following fields:
             - bc: The ePub editor object.
-            - id: The file's manifest id (listed in the OPF file)
-            - match: The regular expression match object
+            - manifest_id: The file's manifest id (listed in the OPF file)
             - local_no: Number in the current file (from 1)
             - global_no: Number in all files (from 1)
             - file_no: Number of processed files (from 1)
+            - href: The file's OPF href 
+            - mimetype: The file's media type
+            - match: The regular expression match object
             - string: The contents of the current file
     '''
     fn = re_compile(pattern).sub
@@ -204,7 +217,8 @@ def re_sub(
             def repl(m):
                 nonlocal i, j
                 try:
-                    ret = _repl(ReMoreInfoMatch(bc, id_, m, i, j, k, string))
+                    ret = _repl(IterMatchInfo(
+                        bc, id_, i, j, k, href, mime, m, string))
                 except:
                     if errors == 'skip':
                         j = old_j
@@ -221,6 +235,8 @@ def re_sub(
         for id_ in manifest_id_s:
             old_j = j
             i = 1
+            href = bc.id_to_href(id_)
+            mime = bc.id_to_mime(id_)
             try:
                 string = bc.readfile(id_)
                 string_new = fn(repl, string)
@@ -982,21 +998,25 @@ def edit_html_batch(
 class IterElementInfo(NamedTuple):
     '''The wrapper for the output tuple, contains the following fields
 
-    global_no:   the sequence number of epub (global) output
-    local_no:    the sequence number of each (x)html (local) output
-    element:     (x)html element object
-    etree:       (x)html tree object
-    manifest_id: manifest id
+    bc:          The ePub editor object `BookContainer`
+    manifest_id: The file's manifest id (listed in the OPF file)
+    local_no:    Number in the current file (from 1)
+    global_no:   Number in all files (from 1)
+    file_no:     Number of processed files (from 1)
     href:        OPF href
-    mimetype:    media type
+    mimetype:    Media type
+    element:     (X)HTML element object
+    etree:       (X)HTML tree object
     '''
-    global_no: int
-    local_no: int
-    element: _Element
-    etree: _Element
+    bc: BookContainer
     manifest_id: str
+    local_no: int
+    global_no: int
+    file_no: int
     href: str
     mimetype: str
+    element: _Element
+    etree: _Element
 
 
 class EnumSelectorType(Enum):
@@ -1034,8 +1054,8 @@ def element_iter(
     namespaces: Optional[Mapping] = None, 
     translator: Union[str, GenericTranslator] = 'xml',
     predicate: Optional[Callable[..., bool]] = None,
-    wrap_yield: bool = True,
-) -> Union[Generator[IterElementInfo, None, None], Generator[_Element, None, None]]:
+    more_info: bool = False,
+) -> Union[Generator[_Element, None, None], Generator[IterElementInfo, None, None]]:
     '''Traverse all (X)HTML files in epub, search the elements that match the path, 
     and return the relevant information of these elements one by one.
 
@@ -1073,9 +1093,11 @@ def element_iter(
             [('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description', 'blah')]
 
     :param translator: A CSS Selector expression to XPath expression translator object.
-    :param wrap_yield: Determine whether to wrap the yield results
+    :param more_info: Determine whether to wrap the yielding results.
+        If false, the yielding results are the match objects of the `path` expression,
+        else are the namedtuple `IterElementInfo` objects (with some context information).
 
-    :return: Generator, if `wrap_yield` is True, then yield `IterElementInfo` object, 
+    :return: Generator, if `more_info` is True, then yield `IterElementInfo` object, 
              else yield `Element` object.
 
     Example::
@@ -1083,11 +1105,11 @@ def element_iter(
             ...
 
         for info in element_iter(css_selector, bc):
-            operations_on_element(info.element)
+            operations_on_element(element)
 
         # OR equivalent to
-        for element in element_iter(css_selector, bc, wrap_yield=False):
-            operations_on_element(element)
+        for element in element_iter(css_selector, bc, more_info=True):
+            operations_on_element(info.element)
     '''
     select: XPath
     if isinstance(path, str):
@@ -1105,18 +1127,19 @@ def element_iter(
         except KeyError:
             bc = cast(BookContainer, function._EDIT_CONTAINER)
 
-    i: int = 0
+    j: int = 0
     data: dict
-    for data in edit_html_iter(bc, predicate=predicate, wrap_me=True): # type: ignore
+    for k, data in enumerate(edit_html_iter(bc, predicate=predicate, wrap_me=True), 1): # type: ignore
         tree = data['etree']
+        id_, href, mime = data['manifest_id'], data['href'], data['mimetype']
         els = select(tree)
         if not els:
             del data['write_back']
             continue
-        if wrap_yield:
-            for i, (j, el) in enumerate(enumerate(els, 1), i + 1):
+        if more_info:
+            for i, (j, el) in enumerate(enumerate(els, j + 1), 1):
                 yield IterElementInfo(
-                    i, j, el, tree, data['manifest_id'], data['href'], data['mimetype'])
+                    bc, id_, i, j, k, href, mime, el, tree)
         else:
             yield from els
 
