@@ -279,7 +279,7 @@ class TkinterXMLConfigParser:
             namespace = {}
         self.namespace = namespace
         self.set_name_to_namespace = set_name_to_namespace
-        self._namemap: dict = WeakValueDictionary()
+        self._namemap: MutableMapping = WeakValueDictionary()
         self._pairs: dict = {}
 
         namespace.update(
@@ -360,7 +360,7 @@ class TkinterXMLConfigParser:
         locals: Optional[Mapping] = None, 
     ):
         if globals is None:
-            globals: dict = self.namespace
+            globals = self.namespace
         if locals is None:
             extras: dict = {
                 'el_text': el.text, 
@@ -382,6 +382,8 @@ class TkinterXMLConfigParser:
                 el_attrib[k] = v if ret is None else ret
 
         args_str = el_attrib.get('args-')
+        pargs: tuple
+        kargs: dict
         if args_str is None:
             pargs, kargs = (), {}
         else:
@@ -406,7 +408,7 @@ class TkinterXMLConfigParser:
         locals: Optional[Mapping] = None, 
     ):
         if globals is None:
-            globals: dict = self.namespace
+            globals = self.namespace
         if locals is None:
             extras: dict = {
                 'el_text': el.text, 
@@ -453,9 +455,10 @@ class TkinterXMLConfigParser:
         if el_tag == 'script':
             return self.parse_element_script(el, parent, globals, locals)
 
-        widget_factory = self.getitem_for_tagname(el_tag)
+        widget_factory: Optional[Callable] = self.getitem_for_tagname(el_tag)
         if widget_factory is None:
             return
+        widget_factory = cast(Callable, widget_factory)
 
         if globals is None:
             globals = self.namespace
@@ -483,7 +486,7 @@ class TkinterXMLConfigParser:
             if parent is None:
                 raise ValueError('%r cannot be the top level element' %el_tag)
             label = kargs.pop('label', 'Menu')
-            widget = widget_factory(parent, *pargs, **kargs)
+            widget = widget_factory(parent, *pargs, **kargs) # type: ignore # Found a bug of mypy?
             if isinstance(parent, tkinter.Menu):
                 parent.add_cascade(label=label, menu=widget)
             else:
@@ -626,6 +629,8 @@ class TkinterXMLConfigParser:
                 exec(script_removeprefix(script_str), globals, locals)
 
             args_str = child_attrib.get('args-')
+            pargs: tuple
+            kargs: dict
             if args_str is None:
                 pargs, kargs = (), {}
             else:
@@ -670,6 +675,8 @@ class TkinterXMLConfigParser:
                 globals, globals.get('namemap', self._namemap), extras)
 
         args_str = el_attrib.get('args-')
+        pargs: tuple
+        kargs: dict
         if args_str is None:
             pargs, kargs = (), {}
         else:

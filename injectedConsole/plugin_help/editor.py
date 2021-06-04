@@ -4,13 +4,13 @@ This module provides some functions for modifying files in the
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1)
+__version__ = (0, 1, 1)
 __all__ = [
-    'WriteBack', 'DoNotWriteBack', 'make_element','make_html_element', 
-    'xml_fromstring', 'xml_tostring', 'html_fromstring', 'html_tostring', 
-    'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
-    'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 
-    'EnumSelectorType', 'element_iter', 'EditStack', 'TextEditStack', 
+    'ReMoreInfoMatch', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'make_element', 
+    'make_html_element', 'xml_fromstring', 'xml_tostring', 'html_fromstring', 
+    'html_tostring', 'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
+    'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 'EnumSelectorType', 
+    'element_iter', 'EditStack', 'TextEditStack', 
 ]
 
 import sys
@@ -20,8 +20,9 @@ from enum import Enum
 from functools import partial
 from inspect import getfullargspec, CO_VARARGS
 from platform import system
+from re import compile as re_compile, Match, Pattern
 from typing import (
-    cast, Any, Callable, ContextManager, Dict, Generator, 
+    cast, Any, Callable, ContextManager, Dict, Final, Generator, 
     Iterable, Iterator, List, Mapping, NamedTuple, Optional, 
     Tuple, TypeVar, Union, 
 )
@@ -32,7 +33,7 @@ from lxml.cssselect import CSSSelector # type: ignore
 from lxml.etree import ( # type: ignore
     fromstring as xml_fromstring, tostring as _xml_tostring, 
     _Element, _ElementTree, Element, XPath, 
-) 
+)
 from lxml.html import ( # type: ignore
     fromstring as _html_fromstring, tostring as _html_tostring, 
     Element as HTMLElement, HtmlElement, HTMLParser, 
@@ -44,12 +45,203 @@ from . import function
 
 
 T = TypeVar('T')
+PatternType = Union[bytes, str, Pattern]
 
-_PLATFORM_IS_WINDOWS = system() == 'Windows'
-_HTML_DOCTYPE = b'<!DOCTYPE html>'
-_XHTML_DOCTYPE = (b'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" '
-                  b'"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">')
+_PLATFORM_IS_WINDOWS: Final[bool] = system() == 'Windows'
+_HTML_DOCTYPE: bytes = b'<!DOCTYPE html>'
+_XHTML_DOCTYPE: bytes = (b'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" '
+                         b'"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">')
 _HTML_PARSER = HTMLParser(default_doctype=False)
+
+
+class ReMoreInfoMatch(NamedTuple):
+    '''Context information wrapping for regular expression matches.
+
+    - bc: The ePub editor object `BookContainer`. 
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    - id: The file's manifest id (listed in the OPF file)
+    - match: The regular expression match object
+    - local_no: Number in the current file (from 1)
+    - global_no: Number in all files (from 1)
+    - file_no: Number of processed files (from 1)
+    - string: The contents of the current file
+    '''
+    bc: BookContainer
+    id: str
+    match: Match
+    local_no: int
+    global_no: int
+    file_no: int
+    string: Union[bytes, str]
+
+
+def re_iter(
+    pattern: PatternType, 
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
+    bc: Optional[BookContainer] = None, 
+    errors: str = 'ignore', 
+    more_info: bool = False, 
+) -> Union[Generator[Match, None, None], Generator[ReMoreInfoMatch, None, None]]:
+    '''Iterate over each of the files corresponding to the given `manifest_id_s` 
+    with regular expressions, and yield matches one by one.
+
+    :param pattern: A regular expression pattern string or compiled object.
+    :param manifest_id_s: Manifest id collection, be located in OPF file,
+        The XPath as following (the `namespace` depends on the specific situation):
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get with `bc.text_iter()`.
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    :param errors: Strategies for errors, it can take a value in ('ignore', 'raise', 'skip').
+        - ignore: Ignore the error and continue processing, but the number will increase.
+        - raise: Ignore the error and continue processing, the number will not increase.
+        - skip: Raise the error and stop processing.
+    :param more_info: 
+        If false, the yielding information is the match object of the regular expression,
+        else the yielding information is a namedtuple, including the following fields:
+            - bc: The ePub editor object.
+            - id: The file's manifest id (listed in the OPF file)
+            - match: The regular expression match object
+            - local_no: Number in the current file (from 1)
+            - global_no: Number in all files (from 1)
+            - file_no: Number of processed files (from 1)
+            - string: The contents of the current file
+
+    :return: Generator, if `more_info` is True, then yield `ReMoreInfoMatch` object, 
+             else yield `Element` object.
+    '''
+    fn = re_compile(pattern).finditer
+    if bc is None:
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    if manifest_id_s is None:
+        manifest_id_s = (info[0] for info in bc.text_iter())
+    elif isinstance(manifest_id_s, str):
+        manifest_id_s = manifest_id_s,
+
+    if more_info:
+        i = j = k = 1
+
+        for id_ in manifest_id_s:
+            try:
+                string = bc.readfile(id_)
+                i = 1
+                for match in fn(string):
+                    yield ReMoreInfoMatch(bc, id_, match, i, j, k, string)
+                    i += 1
+                    j += 1
+            except:
+                if errors == 'skip':
+                    continue
+                elif errors == 'raise':
+                    raise
+            k += 1
+    else:
+        for id_ in manifest_id_s:
+            try:
+                string = bc.readfile(id_)
+                yield from fn(string)
+            except:
+                if errors == 'raise':
+                    raise
+
+
+def re_sub(
+    pattern: PatternType, 
+    repl='', 
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
+    bc: Optional[BookContainer] = None, 
+    errors: str = 'ignore', 
+    more_info: bool = False, 
+) -> None:
+    '''Iterate over each of the files corresponding to the given `manifest_id_s` 
+    with regular expressions, and replace all matches.
+
+    :param pattern: A regular expression pattern string or compiled object.
+    :param repl: 
+    :param manifest_id_s: Manifest id collection, be located in OPF file,
+        The XPath as following (the `namespace` depends on the specific situation):
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get with `bc.text_iter()`.
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    :param errors: Strategies for errors, it can take a value in ('ignore', 'raise', 'skip').
+        - ignore: Ignore the error and continue processing, but the number will increase.
+        - raise: Ignore the error and continue processing, the number will not increase.
+        - skip: Raise the error and stop processing.
+    :param more_info: This parameter only takes effect when `repl` is a callable.
+        If false, the argument was passed to the `repl` function is the match object of the regular expression,
+        else the argument was passed to the `repl` function is a namedtuple, including the following fields:
+            - bc: The ePub editor object.
+            - id: The file's manifest id (listed in the OPF file)
+            - match: The regular expression match object
+            - local_no: Number in the current file (from 1)
+            - global_no: Number in all files (from 1)
+            - file_no: Number of processed files (from 1)
+            - string: The contents of the current file
+    '''
+    fn = re_compile(pattern).sub
+    if bc is None:
+        try:
+            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+        except KeyError:
+            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    if manifest_id_s is None:
+        manifest_id_s = (info[0] for info in bc.text_iter())
+    elif isinstance(manifest_id_s, str):
+        manifest_id_s = manifest_id_s,
+
+    if callable(repl):
+        if more_info:
+            _repl = repl
+            def repl(m):
+                nonlocal i, j
+                try:
+                    ret = _repl(ReMoreInfoMatch(bc, id_, m, i, j, k, string))
+                except:
+                    if errors == 'skip':
+                        j = old_j
+                        raise
+                    elif errors == 'raise':
+                        raise
+                else:
+                    i += 1
+                    j += 1
+                    return ret
+
+        i = j = k = 1
+
+        for id_ in manifest_id_s:
+            old_j = j
+            i = 1
+            try:
+                string = bc.readfile(id_)
+                string_new = fn(repl, string)
+                if string != string_new:
+                    bc.writefile(id_, string_new)
+            except:
+                if errors == 'skip':
+                    continue
+                elif errors == 'raise':
+                    raise
+            k += 1
+    else:
+        for id_ in manifest_id_s:
+            try:
+                string = bc.readfile(id_)
+                string_new = fn(repl, string)
+                if string != string_new:
+                    bc.writefile(id_, string_new)
+            except:
+                if errors == 'raise':
+                    raise
 
 
 class WriteBack(Exception):
@@ -306,7 +498,7 @@ def edit(
 ) -> bool:
     '''Read the file data, operate on, and then write the changed data back
 
-    :param manifest_id: Manifest id, be located in content.opf file, 
+    :param manifest_id: Manifest id, be located in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param operate: Take data in, operate on, and then return the changed data
@@ -347,7 +539,7 @@ def ctx_edit(
 ) -> Generator[Union[None, dict, bytes, str], Any, bool]:
     '''Read and yield the file data, and then take in and write back the changed data.
 
-    :param manifest_id: Manifest id, be located in content.opf file, 
+    :param manifest_id: Manifest id, be located in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
@@ -434,7 +626,7 @@ def ctx_edit_sgml(
     '''Read and yield the etree object (parsed from a xml file), 
     and then write back the above etree object.
 
-    :param manifest_id: Manifest id, be located in content.opf file, 
+    :param manifest_id: Manifest id, be located in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
@@ -491,7 +683,7 @@ def ctx_edit_html(
     '''Read and yield the etree object (parsed from a html file), 
     and then write back the above etree object.
 
-    :param manifest_id: Manifest id, be located in content.opf file, 
+    :param manifest_id: Manifest id, be located in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
@@ -524,7 +716,7 @@ def ctx_edit_html(
 
 
 def edit_iter(
-    manifest_id_s: Optional[Iterable[str]] = None, 
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
     predicate: Optional[Callable[..., bool]] = None, 
     wrap_me: bool = False, 
@@ -532,7 +724,7 @@ def edit_iter(
 ) -> Generator:
     '''Used to process a collection of specified files in ePub file one by one
 
-    :param manifest_id_s: Manifest id collection, be located in content.opf file,
+    :param manifest_id_s: Manifest id collection, be located in OPF file,
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
@@ -582,6 +774,8 @@ def edit_iter(
 
     if manifest_id_s is None:
         it = bc.manifest_iter()
+    elif isinstance(manifest_id_s, str):
+        it = [(manifest_id_s, bc.id_to_href(manifest_id_s), bc.id_to_mime(manifest_id_s))]
     else:
         it = ((fid, bc.id_to_href(fid), bc.id_to_mime(fid)) 
               for fid in manifest_id_s)
@@ -599,13 +793,13 @@ def edit_iter(
 
 def edit_batch(
     operate: Callable, 
-    manifest_id_s: Optional[Iterable[str]] = None, 
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
     predicate: Optional[Callable[..., bool]] = None, 
 ) -> Dict[str, bool]:
     '''Used to process a collection of specified files in ePub file one by one
 
-    :param manifest_id_s: Manifest id collection, be located in content.opf file,
+    :param manifest_id_s: Manifest id collection, be located in OPF file,
         The XPath as following (the `namespace` depends on the specific situation):
         /namespace:package/namespace:manifest/namespace:item/@id
     :param operate: Take data in, operate on, and then return the changed data.
@@ -638,6 +832,8 @@ def edit_batch(
 
     if manifest_id_s is None:
         it = bc.manifest_iter()
+    elif isinstance(manifest_id_s, str):
+        it = [(manifest_id_s, bc.id_to_href(manifest_id_s), bc.id_to_mime(manifest_id_s))]
     else:
         it = ((fid, bc.id_to_href(fid), bc.id_to_mime(fid)) 
               for fid in manifest_id_s)
@@ -879,7 +1075,7 @@ def element_iter(
     :param translator: A CSS Selector expression to XPath expression translator object.
     :param wrap_yield: Determine whether to wrap the yield results
 
-    :return: Generator, if wrap_yield yield `IterElementInfo` object, 
+    :return: Generator, if `wrap_yield` is True, then yield `IterElementInfo` object, 
              else yield `Element` object.
 
     Example::

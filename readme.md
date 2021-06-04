@@ -25,13 +25,15 @@ TODO: to be continued...
 
 ### Recommended modules
 
-#### Selector
+#### Parser or Selector 
 - [lxml](https://pypi.org/project/lxml/)
 - [pyquery](https://pypi.org/project/pyquery/)
 - [beautifulsoup4](https://pypi.org/project/beautifulsoup4/)
 - [parsel](https://pypi.org/project/parsel/)
 - [cssselect2](https://pypi.org/project/cssselect2/)
 - [cssselect](https://pypi.org/project/cssselect/)
+- [html5lib](https://pypi.org/project/html5lib/)
+- [htmldom](https://pypi.org/project/htmldom/)
 
 #### Text
 - [flashtext](https://pypi.org/project/flashtext/)

@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 8)
-__revision__ = 3
+__revision__ = 4
 __all__ = ['run']
 
 import builtins

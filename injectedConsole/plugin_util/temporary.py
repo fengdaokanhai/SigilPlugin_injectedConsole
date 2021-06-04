@@ -2,57 +2,129 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 3)
+__version__ = (0, 0, 4)
 
 import os, sys
 
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Tuple, Union
+from copy import copy as _copy, deepcopy as _deepcopy
+from tempfile import NamedTemporaryFile, TemporaryDirectory
+from typing import cast, Callable, Dict, List, Optional, Tuple, Union
 from types import ModuleType
 
+from .undefined import undefined
 
-__all__ = ['temp_dict', 'temp_list', 'temp_set', 'temp_wdir', 
-           'temp_sys_path', 'temp_sys_modules']
+
+__all__ = ['temp_dict', 'temp_list', 'temp_set', 'temp_wdir', 'temp_namespace', 
+           'temp_namespace_call', 'temp_attr', 'temp_wdir', 'temp_sys_path', 
+           'temp_sys_modules', 'temp_dir', 'temp_file']
 
 
 PathType = Union[str, bytes, os.PathLike]
 
 
 @contextmanager
-def temp_dict(container: dict, /):
-    original = container.copy()
+def temp_dict(container: dict, /, copy=False, deepcopy=False):
+    cp = cast(Callable, _deepcopy if deepcopy else _copy)
+    if copy:
+        container = cp(container)
+    else:
+        orig_container = cp(container)
     try:
         yield container
     finally:
-        container.clear()
-        container.update(original)
+        if not copy:
+            container.clear()
+            container.update(orig_container)
 
 
 @contextmanager
-def temp_list(container: list, /):
-    original = container.copy()
+def temp_list(container: list, /, copy=False, deepcopy=False):
+    cp = cast(Callable, _deepcopy if deepcopy else _copy)
+    if copy:
+        container = cp(container)
+    else:
+        orig_container = cp(container)
     try:
         yield container
     finally:
-        container[:] = original
+        if not copy:
+            container[:] = orig_container
 
 
 @contextmanager
-def temp_set(container: set, /):
-    original = container.copy()
+def temp_set(container: set, /, copy=False, deepcopy=False):
+    cp = cast(Callable, _deepcopy if deepcopy else _copy)
+    if copy:
+        container = cp(container)
+    else:
+        orig_container = cp(container)
     try:
         yield container
     finally:
-        container.clear()
-        container.update(original)
+        if not copy:
+            container.clear()
+            container.update(orig_container)
 
 
 @contextmanager
-def temp_wdir(wdir: PathType):
+def temp_namespace(ns=None, /, *ns_extras, **ns_extra):
+    if ns is None:
+        sys._getframe(2).f_globals
+    with temp_dict(ns) as g:
+        if ns_extras:
+            for ext in ns_extras:
+                g.update(ext)
+        if ns_extra:
+            g.update(ns_extra)
+        yield g
+
+
+@contextmanager
+def temp_namespace_call(ns=None, /, *names, **ns_extra):
+    if ns is None:
+        sys._getframe(2).f_globals
+    with temp_namespace(ns, **ns_extra) as g:
+        yield g
+        excs = []
+        for i, name in enumerate(names):
+            try:
+                g[name]()
+            except BaseException as exc:
+                excs.append((i, name, exc))
+        if excs:
+            raise Exception(excs)
+
+
+@contextmanager
+def temp_attr(obj, attr, value=undefined):
+    old_attr = getattr(obj, attr, undefined)
+    if value is undefined:
+        if old_attr is not undefined:
+            try:
+                new_attr = _deepcopy(old_attr)
+            except TypeError:
+                new_attr = _copy(old_attr)
+            setattr(obj, attr, new_attr)
+    else:
+        setattr(obj, attr, value)
+    try:
+        yield
+    finally:
+        if old_attr is undefined:
+            if hasattr(obj, attr):
+                delattr(obj, attr)
+        elif getattr(obj, attr, undefined) is not old_attr:
+            setattr(obj, attr, old_attr)
+
+
+@contextmanager
+def temp_wdir(wdir: Optional[PathType] = None):
     'Temporary working directory'
     original_wdir: PathType = os.getcwd()
     try:
-        os.chdir(wdir)
+        if wdir:
+            os.chdir(wdir)
         yield
     finally:
         os.chdir(original_wdir)
@@ -98,4 +170,36 @@ def temp_sys_modules(
             if restore:
                 sys_modules.clear()
                 sys_modules.update(original_sys_modules)
+
+
+@contextmanager
+def temp_dir(path: Optional[PathType] = None):
+    if path is not None:
+        os.makedirs(path)
+        try:
+            yield path
+        finally:
+            try:
+                os.removedirs(path)
+            except FileNotFoundError:
+                pass
+    else:
+        with TemporaryDirectory() as d:
+            yield d
+
+
+@contextmanager
+def temp_file(path: Optional[PathType] = None):
+    if path is not None:
+        open(path, 'x+b')
+        try:
+            yield path
+        finally:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+    else:
+        with NamedTemporaryFile() as f:
+            yield f.name
 

@@ -8,6 +8,8 @@ __all__ = ['DragDropListbox', 'MultiListbox', 'Tooltip']
 
 import tkinter
 
+from types import MappingProxyType
+
 
 class DragDropListbox(tkinter.Listbox):
 
@@ -94,17 +96,22 @@ class MultiListbox(tkinter.Frame):
     def __init__(self, master, header_list, data=None, **kwds):
         super().__init__(master)
         self._listbox_list = []
+        self._listbox_dict = {}
         for header in header_list:
             kwargs = kwds.copy()
             frame = tkinter.Frame(self)
             frame.pack(side='left', expand='yes', fill='both')
             if isinstance(header, str):
                 label = header
+                tkinter.Label(frame, text=label, borderwidth=1, relief='raised').pack(fill='x')
             else:
                 label, *rest = header
                 if rest:
                     kwargs['width'] = rest[0]
-            tkinter.Label(frame, text=label, borderwidth=1, relief='raised').pack(fill='x')
+                tk_label = tkinter.Label(frame, text=label, borderwidth=1, relief='raised')
+                tk_label.pack(fill='x')
+                if len(rest) >= 2:
+                    Tooltip(tk_label, text=rest[1])
             lb = tkinter.Listbox(frame, **kwargs)
             lb.pack(expand='yes', fill='both')
             lb.bind("<Button-1>", self.setCurrent)
@@ -117,6 +124,7 @@ class MultiListbox(tkinter.Frame):
             lb.bind("<B2-Motion>", lambda e, _f=self._b2motion: _f(e.x, e.y))
             lb.bind("<Button-2>", lambda e, _f=self._button2: _f(e.x, e.y))
             self._listbox_list.append(lb)
+            self._listbox_dict[label] = lb
         frame = tkinter.Frame(self)
         frame.pack(side='left', fill='y')
         tkinter.Label(frame, borderwidth=1, relief='raised').pack(fill='x')
@@ -130,6 +138,10 @@ class MultiListbox(tkinter.Frame):
                 lb.insert(0, *vals)
         self._listbox_list[0]["yscrollcommand"] = sb.set
         self.curIndex = None
+
+    @property
+    def listboxes(self) -> MappingProxyType[str, tkinter.Listbox]:
+        return MappingProxyType(self._listbox_dict)
 
     def setCurrent(self, event):
         self.curIndex = event.widget.nearest(event.y)

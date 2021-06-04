@@ -14,7 +14,7 @@
     def ask_save_config_dialog():
         val = ask_save_config()
         if val is not None:
-            config['configs'].append((val, config['config'].copy()))
+            config['configs'].append([val, config['config'].copy()])
 
     def ask_load_config_dialog():
         ask_load_config()
@@ -99,14 +99,6 @@
     </toplevel>
     <toplevel name="ask_load_config">
         <script type="text/python">
-        def lb_dbclick(event):
-            sels = event.widget.curselection()
-            if sels:
-                selected = sels[0]
-                config['config'] = config['configs'][selected][1].copy()
-                set_config(config['config'])
-                namemap['ask_load_config'].destroy()
-
         def btn_click_del_lb_sel():
             target = namemap['lb2']
             sels = target.curselection()
@@ -138,7 +130,8 @@
         </frame>
         <MultiListbox 
             name="lb2" 
-            header_list="([[('Label', 10), ('Config', 40)]])"
+            header_list="([[('Label', 10, 'Double click to modify the label'), 
+                         ('Config', 40, 'Double click to apply the value')]])"
             data="([config['configs']])"
             selectmode="extended"
             borderwidth="0"
@@ -146,8 +139,30 @@
             exportselection="false"
             selectborderwidth="0"
             m-pack="side=left, fill=both, expand=true"
-            m-bind="'&lt;Double-Button-1&gt;', ([lb_dbclick])"
         />
+        <script>
+        def lb_label_dbclick(event):
+            lb = event.widget
+            sels = lb.curselection()
+            if sels:
+                selected = sels[0]
+                val = ask_save_config()
+                if val is not None:
+                    lb.delete(selected)
+                    lb.insert(0, val)
+                    config['configs'][selected][0] = val
+
+        def lb_config_dbclick(event):
+            sels = event.widget.curselection()
+            if sels:
+                selected = sels[0]
+                config['config'] = config['configs'][selected][1].copy()
+                set_config(config['config'])
+                namemap['ask_load_config'].destroy()
+
+        lb2.listboxes['Label'].bind('&lt;Double-Button-1&gt;', lb_label_dbclick)
+        lb2.listboxes['Config'].bind('&lt;Double-Button-1&gt;', lb_config_dbclick)
+        </script>
     </toplevel>
     <label bd="1" relief="sunken" anchor="w" m-pack="side=top,fill=x" text="close the window to take effect" bg="red" fg="yellow" font="([font_bold_underline])" />
     <label text="Select a Shell" height="2" font="([font_bold_underline])">
