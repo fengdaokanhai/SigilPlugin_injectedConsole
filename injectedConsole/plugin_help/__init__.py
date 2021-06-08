@@ -9,12 +9,6 @@ from plugin_util.urlimport import (
     remove_path_hook as remove_url_hook
 )
 
-try:
-    ensure_import('lxml')
-    ensure_import('cssselect')
-    from .editor import *
-except ImportError:
-    pass
-
+from .editor import *
 from .function import *
 

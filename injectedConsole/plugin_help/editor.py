@@ -1,16 +1,18 @@
+#!/usr/bin/env python
+# coding: utf-8
+
 '''
 This module provides some functions for modifying files in the 
 [Sigil Ebook Editor](https://sigil-ebook.com/) plug-ins.
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1, 1)
+__version__ = (0, 1, 2)
+
 __all__ = [
-    'IterMatchInfo', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'make_element', 
-    'make_html_element', 'xml_fromstring', 'xml_tostring', 'html_fromstring', 
-    'html_tostring', 'edit', 'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 
-    'edit_batch', 'edit_html_iter', 'edit_html_batch', 'IterElementInfo', 'EnumSelectorType', 
-    'element_iter', 'EditStack', 'TextEditStack', 
+    'IterMatchInfo', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'edit', 
+    'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 'edit_batch', 
+    'edit_html_iter', 'edit_html_batch', 'EditStack', 'TextEditStack', 
 ]
 
 import sys
@@ -19,7 +21,6 @@ from contextlib import contextmanager, ExitStack
 from enum import Enum
 from functools import partial
 from inspect import getfullargspec, CO_VARARGS
-from platform import system
 from re import compile as re_compile, Match, Pattern
 from typing import (
     cast, Any, Callable, ContextManager, Dict, Final, Generator, 
@@ -28,30 +29,34 @@ from typing import (
 )
 from types import MappingProxyType
 
-from cssselect.xpath import GenericTranslator # type: ignore
-from lxml.cssselect import CSSSelector # type: ignore
-from lxml.etree import ( # type: ignore
-    fromstring as xml_fromstring, tostring as _xml_tostring, 
-    _Element, _ElementTree, Element, XPath, 
-)
-from lxml.html import ( # type: ignore
-    fromstring as _html_fromstring, tostring as _html_tostring, 
-    Element as HTMLElement, HtmlElement, HTMLParser, 
-)
-
 from bookcontainer import BookContainer # type: ignore
 
 from . import function
 
+try:
+    from plugin_util.usepip import check_install
+
+    check_install('lxml')
+    check_install('cssselect')
+
+    from cssselect.xpath import GenericTranslator # type: ignore
+    from lxml.cssselect import CSSSelector # type: ignore
+    from lxml.etree import _Element as Element # type: ignore
+    from lxml.xpath import XPath # type: ignore
+    from plugin_util.lxmlparser import ( # type: ignore
+        html_fromstring, html_tostring, xml_fromstring, xml_tostring
+    )
+    _LXML_IMPORTED = True
+except ImportError:
+    from xml.etree.ElementTree import Element
+    from plugin_util.htmlparser import ( # type: ignore
+        html_fromstring, html_tostring, xml_fromstring, xml_tostring
+    )
+    _LXML_IMPORTED = False
+
 
 T = TypeVar('T')
 PatternType = Union[bytes, str, Pattern]
-
-_PLATFORM_IS_WINDOWS: Final[bool] = system() == 'Windows'
-_HTML_DOCTYPE: bytes = b'<!DOCTYPE html>'
-_XHTML_DOCTYPE: bytes = (b'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" '
-                         b'"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">')
-_HTML_PARSER = HTMLParser(default_doctype=False)
 
 
 class IterMatchInfo(NamedTuple):
@@ -273,16 +278,6 @@ class DoNotWriteBack(Exception):
     you can raise this exception'''
 
 
-def _ensure_bytes(o: Any) -> bytes:
-    'Ensure the return value is `bytes` type'
-    if isinstance(o, bytes):
-        return o
-    elif isinstance(o, str):
-        return bytes(o, encoding='utf-8')
-    else:
-        return bytes(o)
-
-
 class _Result(NamedTuple):
     argcount: int
     has_varargs: bool
@@ -323,188 +318,6 @@ def _make_standard_predicate(
 
     pred.__name__ = 'predicate'
     return pred
-
-
-def make_element(
-    tag: str, 
-    text: Optional[str] = None, 
-    attrib: Optional[Mapping] = None,
-    nsmap: Optional[Mapping] = None,
-    children: Optional[List[_Element]] = None,
-    tail: Optional[str] = None, 
-    **_extra,
-) -> _Element:
-    '''Make a lxml.etree._Element object
-
-    Tips: Please read the following documentation(s) for details
-        - lxml.etree.Element
-        - lxml.html._Element
-    '''
-    el = Element(tag, attrib=attrib, nsmap=nsmap, **_extra)
-    if text is not None:
-        el.text = text
-    if children is not None:
-        el.extend(children)
-    if tail is not None:
-        el.tail = tail
-    return el
-
-
-def make_html_element(
-    tag: str, 
-    text: Optional[str] = '', 
-    attrib: Optional[Mapping] = None,
-    nsmap: Optional[Mapping] = None,
-    children: Optional[List[HtmlElement]] = None,
-    tail: Optional[str] = None, 
-    **_extra,
-) -> HtmlElement:
-    '''Make a lxml.html.HtmlElement object
-
-    Tips: Please read the following documentation(s) for details
-        - lxml.etree.Element
-        - lxml.html.HtmlElement
-    '''
-    el = HTMLElement(tag, attrib=attrib, nsmap=nsmap, **_extra)
-    if text is not None:
-        el.text = text
-    if children is not None:
-        el.extend(children)
-    if tail is not None:
-        el.tail = tail
-    return el
-
-
-def xml_tostring(
-    el: Union[_Element, _ElementTree], 
-    method: str = 'xml', 
-    **kwds,
-) -> bytes:
-    '''Convert a root element node to string by using 
-    `lxml.etree.tostring` function
-
-    Tips: Please read the following documentation(s) for details
-        - lxml.etree.tostring
-
-    :param method: The argument 'method' selects the output method: 'xml',
-        'html', plain 'text' (text content without tags), 'c14n' or 'c14n2'.
-        Default is 'xml'.
-        With ``method="c14n"`` (C14N version 1), the options ``exclusive``,
-        ``with_comments`` and ``inclusive_ns_prefixes`` request exclusive
-        C14N, include comments, and list the inclusive prefixes respectively.
-        With ``method="c14n2"`` (C14N version 2), the ``with_comments`` and
-        ``strip_text`` options control the output of comments and text space
-        according to C14N 2.0.
-    :param kwds: Keyword arguments `kwds` will be passed to 
-        `lxml.etree.tostring` function
-
-    :return: An XML string representation of the document
-    '''
-    if method not in ('xml', 'html'):
-        return _xml_tostring(el, method=method, **kwds)
-
-    roottree: _ElementTree = el.getroottree() if isinstance(el, _Element) else el
-    docinfo = roottree.docinfo
-    encoding = kwds.setdefault('encoding', docinfo.encoding or 'UTF-8')
-
-    string = _xml_tostring(roottree, method=method, **kwds)
-    if method == 'xml':
-        string = b'<?xml version="%s" encoding="%s"?>\n'% (
-            _ensure_bytes(docinfo.xml_version or b'1.0'),
-            _ensure_bytes(encoding),
-        ) + string
-
-    if _PLATFORM_IS_WINDOWS:
-        string = string.replace(b'&#13;', b'')
-    return string
-
-
-def html_fromstring(
-    string: Union[str, bytes], 
-    parser = _HTML_PARSER,
-    **kwds
-) -> _Element:
-    '''Convert a string to `lxml.etree._Element` object by using 
-    `lxml.html.fromstring` function
-
-    Tips: Please read the following documentation(s) for details
-        - lxml.html.fromstring
-        - lxml.etree.fromstring
-        - lxml.html.HTMLParser
-
-    :params parser: `parser` allows reading HTML into a normal XML tree, 
-        this argument will be passed to `lxml.html.fromstring` function
-    :params kwds: Keyword arguments will be passed to 
-        `lxml.html.fromstring` function
-
-    :return: A single element/document
-    '''
-    if not string.strip():
-        return _html_fromstring(
-            b'<html>\n    <head/>\n    <body/>\n</html>', 
-            parser=parser, **kwds)
-    tree = _html_fromstring(string, parser=parser, **kwds)
-    # get root element
-    for tree in tree.iterancestors(): 
-        pass
-    if tree.find('head') is None:
-        tree.insert(0, make_html_element('head', tail='\n'))
-    if tree.find('body') is None:
-        tree.append(make_html_element('body', tail='\n'))
-    return tree
-
-
-def html_tostring(
-    el: Union[_Element, _ElementTree], 
-    method: str = 'html', 
-    **kwds,
-) -> bytes:
-    '''Convert a root element node to string 
-    by using `lxml.html.tostring` function
-
-    Tips: Please read the following documentation(s) for details
-        - lxml.html.tostring
-        - lxml.etree.tostring
-
-    :param method: Defines the output method.
-        It defaults to 'html', but can also be 'xml' or 'xhtml' for xhtml output, 
-        or 'text' to serialise to plain text without markup.
-    :param kwds: Keyword arguments `kwds` will be passed to 
-        `lxml.html.tostring` function
-
-    :return: An HTML string representation of the document
-    '''
-    if method not in ('xml', 'html', 'xhtml'):
-        return _html_tostring(el, method=method, **kwds)
-
-    roottree: _ElementTree = el.getroottree() if isinstance(el, _Element) else el
-    root: _Element = roottree.getroot()
-    docinfo  = roottree.docinfo
-    doctype = kwds.pop('doctype', docinfo.doctype)
-    encoding = kwds.setdefault('encoding', docinfo.encoding or 'UTF-8')
-
-    if not doctype:
-        if method == 'html':
-            doctype = _HTML_DOCTYPE
-        elif method == 'xhtml':
-            doctype = _XHTML_DOCTYPE
-
-    if method == 'xhtml':
-        method = 'xml'
-    string = (
-        # However, to be honest, if it is an HTML file, 
-        # it does not need to have a <?xml ?> header
-        b'<?xml version="%(xml_version)s" encoding="%(encoding)s"?>'
-        b'\n%(doctype)s\n%(doc)s'
-    ) % {
-        b'xml_version': _ensure_bytes(docinfo.xml_version or b'1.0'),
-        b'encoding': _ensure_bytes(encoding),
-        b'doctype': _ensure_bytes(doctype),
-        b'doc': _html_tostring(root, method=method, **kwds),
-    }
-    if _PLATFORM_IS_WINDOWS:
-        string = string.replace(b'&#13;', b'')
-    return string
 
 
 def edit(
@@ -873,7 +686,7 @@ def edit_html_iter(
     predicate: Optional[Callable[..., bool]] = None, 
     wrap_me: bool = False, 
     yield_cm: bool = False, 
-) -> Generator[Union[None, _Element, dict], Any, None]:
+) -> Generator[Union[None, Element, dict], Any, None]:
     '''Used to process a collection of specified html files in ePub file one by one
 
     :param bc: `BookContainer` object. 
@@ -948,7 +761,7 @@ def edit_html_iter(
 
 
 def edit_html_batch(
-    operate: Callable[[_Element], Any], 
+    operate: Callable[[Element], Any], 
     bc: Optional[BookContainer] = None, 
     predicate: Optional[Callable[..., bool]] = None, 
 ) -> Dict[str, bool]:
@@ -995,153 +808,154 @@ def edit_html_batch(
     return success_status
 
 
-class IterElementInfo(NamedTuple):
-    '''The wrapper for the output tuple, contains the following fields
+if _LXML_IMPORTED:
+    class IterElementInfo(NamedTuple):
+        '''The wrapper for the output tuple, contains the following fields
 
-    bc:          The ePub editor object `BookContainer`
-    manifest_id: The file's manifest id (listed in the OPF file)
-    local_no:    Number in the current file (from 1)
-    global_no:   Number in all files (from 1)
-    file_no:     Number of processed files (from 1)
-    href:        OPF href
-    mimetype:    Media type
-    element:     (X)HTML element object
-    etree:       (X)HTML tree object
-    '''
-    bc: BookContainer
-    manifest_id: str
-    local_no: int
-    global_no: int
-    file_no: int
-    href: str
-    mimetype: str
-    element: _Element
-    etree: _Element
+        bc:          The ePub editor object `BookContainer`
+        manifest_id: The file's manifest id (listed in the OPF file)
+        local_no:    Number in the current file (from 1)
+        global_no:   Number in all files (from 1)
+        file_no:     Number of processed files (from 1)
+        href:        OPF href
+        mimetype:    Media type
+        element:     (X)HTML element object
+        etree:       (X)HTML tree object
+        '''
+        bc: BookContainer
+        manifest_id: str
+        local_no: int
+        global_no: int
+        file_no: int
+        href: str
+        mimetype: str
+        element: Element
+        etree: Element
 
+    class EnumSelectorType(Enum):
+        '''Selector type enumeration.
 
-class EnumSelectorType(Enum):
-    '''Selector type enumeration.
+        .xpath:  Indicates that the selector type is XPath.
+        .cssselect: Indicates that the selector type is CSS Selector.
+        '''
 
-    .xpath:  Indicates that the selector type is XPath.
-    .cssselect: Indicates that the selector type is CSS Selector.
-    '''
+        xpath  = 1
+        XPath  = 1
+        cssselect = 2
+        CSS_Selector = 2
 
-    xpath  = 1
-    XPath  = 1
-    cssselect = 2
-    CSS_Selector = 2
+        @classmethod
+        def of(enum_cls, value):
+            val_cls = type(value)
+            if val_cls is enum_cls:
+                return value
+            elif issubclass(val_cls, int):
+                return enum_cls(value)
+            elif issubclass(val_cls, str):
+                try:
+                    return enum_cls[value]
+                except KeyError as exc:
+                    raise ValueError(value) from exc
+            raise TypeError(f"expected value's type in ({enum_cls!r}"
+                            f", int, str), got {val_cls}")
 
-    @classmethod
-    def of(enum_cls, value):
-        val_cls = type(value)
-        if val_cls is enum_cls:
-            return value
-        elif issubclass(val_cls, int):
-            return enum_cls(value)
-        elif issubclass(val_cls, str):
+    def element_iter(
+        path: Union[str, XPath], 
+        bc: Optional[BookContainer] = None, 
+        seltype: Union[int, str, EnumSelectorType] = EnumSelectorType.cssselect, 
+        namespaces: Optional[Mapping] = None, 
+        translator: Union[str, GenericTranslator] = 'xml',
+        predicate: Optional[Callable[..., bool]] = None,
+        more_info: bool = False,
+    ) -> Union[Generator[Element, None, None], Generator[IterElementInfo, None, None]]:
+        '''Traverse all (X)HTML files in epub, search the elements that match the path, 
+        and return the relevant information of these elements one by one.
+
+        :param path: A XPath expression or CSS Selector expression.
+                    If its `type` is `str`, then it is a XPath expression or 
+                    CSS Selector expression determined by `seltype`.
+                    If its type is a subclass of 'lxml.etree.XPath'`, then 
+                    parameters `seltype`, `namespaces`, `translator` are ignored.
+        :param bc: `BookContainer` object. 
+            If it is None (the default), will be found in caller's globals().
+            `BookContainer` object is an object of ePub book content provided by Sigil, 
+            which can be used to access and operate the files in ePub.
+        :param seltype: Selector type. It can be any value that can be 
+                        accepted by `EnumSelectorType.of`, the return value called final value.
+                        If its final value is `EnumSelectorType.xpath`, then parameter
+                        `translator` is ignored.
+        :param predicate: If it is a callable, it will receive parameters in order (if possible)
+                        (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
+                        continue processing.
+        :param namespaces: Prefix-namespace mappings used by `path`.
+
+            To use CSS namespaces, you need to pass a prefix-to-namespace
+            mapping as `namespaces` keyword argument::
+
+                >>> from lxml import cssselect, etree
+                >>> rdfns = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+                >>> select_ns = cssselect.CSSSelector('root > rdf|Description',
+                ...                                   namespaces={'rdf': rdfns})
+
+                >>> rdf = etree.XML((
+                ...     '<root xmlns:rdf="%s">'
+                ...       '<rdf:Description>blah</rdf:Description>'
+                ...     '</root>') % rdfns)
+                >>> [(el.tag, el.text) for el in select_ns(rdf)]
+                [('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description', 'blah')]
+
+        :param translator: A CSS Selector expression to XPath expression translator object.
+        :param more_info: Determine whether to wrap the yielding results.
+            If false, the yielding results are the match objects of the `path` expression,
+            else are the namedtuple `IterElementInfo` objects (with some context information).
+
+        :return: Generator, if `more_info` is True, then yield `IterElementInfo` object, 
+                else yield `Element` object.
+
+        Example::
+            def operations_on_element(element):
+                ...
+
+            for info in element_iter(css_selector, bc):
+                operations_on_element(element)
+
+            # OR equivalent to
+            for element in element_iter(css_selector, bc, more_info=True):
+                operations_on_element(info.element)
+        '''
+        select: XPath
+        if isinstance(path, str):
+            if EnumSelectorType.of(seltype) is EnumSelectorType.cssselect:
+                select = CSSSelector(
+                    path, namespaces=namespaces, translator=translator)
+            else:
+                select = XPath(path, namespaces=namespaces)
+        else:
+            select = path
+
+        if bc is None:
             try:
-                return enum_cls[value]
-            except KeyError as exc:
-                raise ValueError(value) from exc
-        raise TypeError(f"expected value's type in ({enum_cls!r}"
-                        f", int, str), got {val_cls}")
+                bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
+            except KeyError:
+                bc = cast(BookContainer, function._EDIT_CONTAINER)
 
+        j: int = 0
+        data: dict
+        for k, data in enumerate(edit_html_iter(bc, predicate=predicate, wrap_me=True), 1): # type: ignore
+            tree = data['etree']
+            id_, href, mime = data['manifest_id'], data['href'], data['mimetype']
+            els = select(tree)
+            if not els:
+                del data['write_back']
+                continue
+            if more_info:
+                for i, (j, el) in enumerate(enumerate(els, j + 1), 1):
+                    yield IterElementInfo(
+                        bc, id_, i, j, k, href, mime, el, tree)
+            else:
+                yield from els
 
-def element_iter(
-    path: Union[str, XPath], 
-    bc: Optional[BookContainer] = None, 
-    seltype: Union[int, str, EnumSelectorType] = EnumSelectorType.cssselect, 
-    namespaces: Optional[Mapping] = None, 
-    translator: Union[str, GenericTranslator] = 'xml',
-    predicate: Optional[Callable[..., bool]] = None,
-    more_info: bool = False,
-) -> Union[Generator[_Element, None, None], Generator[IterElementInfo, None, None]]:
-    '''Traverse all (X)HTML files in epub, search the elements that match the path, 
-    and return the relevant information of these elements one by one.
-
-    :param path: A XPath expression or CSS Selector expression.
-                 If its `type` is `str`, then it is a XPath expression or 
-                 CSS Selector expression determined by `seltype`.
-                 If its type is a subclass of 'lxml.etree.XPath'`, then 
-                 parameters `seltype`, `namespaces`, `translator` are ignored.
-    :param bc: `BookContainer` object. 
-        If it is None (the default), will be found in caller's globals().
-        `BookContainer` object is an object of ePub book content provided by Sigil, 
-        which can be used to access and operate the files in ePub.
-    :param seltype: Selector type. It can be any value that can be 
-                    accepted by `EnumSelectorType.of`, the return value called final value.
-                    If its final value is `EnumSelectorType.xpath`, then parameter
-                    `translator` is ignored.
-    :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
-                      continue processing.
-    :param namespaces: Prefix-namespace mappings used by `path`.
-
-        To use CSS namespaces, you need to pass a prefix-to-namespace
-        mapping as ``namespaces`` keyword argument::
-
-            >>> from lxml import cssselect, etree
-            >>> rdfns = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
-            >>> select_ns = cssselect.CSSSelector('root > rdf|Description',
-            ...                                   namespaces={'rdf': rdfns})
-
-            >>> rdf = etree.XML((
-            ...     '<root xmlns:rdf="%s">'
-            ...       '<rdf:Description>blah</rdf:Description>'
-            ...     '</root>') % rdfns)
-            >>> [(el.tag, el.text) for el in select_ns(rdf)]
-            [('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description', 'blah')]
-
-    :param translator: A CSS Selector expression to XPath expression translator object.
-    :param more_info: Determine whether to wrap the yielding results.
-        If false, the yielding results are the match objects of the `path` expression,
-        else are the namedtuple `IterElementInfo` objects (with some context information).
-
-    :return: Generator, if `more_info` is True, then yield `IterElementInfo` object, 
-             else yield `Element` object.
-
-    Example::
-        def operations_on_element(element):
-            ...
-
-        for info in element_iter(css_selector, bc):
-            operations_on_element(element)
-
-        # OR equivalent to
-        for element in element_iter(css_selector, bc, more_info=True):
-            operations_on_element(info.element)
-    '''
-    select: XPath
-    if isinstance(path, str):
-        if EnumSelectorType.of(seltype) is EnumSelectorType.cssselect:
-            select = CSSSelector(
-                path, namespaces=namespaces, translator=translator)
-        else:
-            select = XPath(path, namespaces=namespaces)
-    else:
-        select = path
-
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
-
-    j: int = 0
-    data: dict
-    for k, data in enumerate(edit_html_iter(bc, predicate=predicate, wrap_me=True), 1): # type: ignore
-        tree = data['etree']
-        id_, href, mime = data['manifest_id'], data['href'], data['mimetype']
-        els = select(tree)
-        if not els:
-            del data['write_back']
-            continue
-        if more_info:
-            for i, (j, el) in enumerate(enumerate(els, j + 1), 1):
-                yield IterElementInfo(
-                    bc, id_, i, j, k, href, mime, el, tree)
-        else:
-            yield from els
+    __all__.extend(('IterElementInfo', 'EnumSelectorType', 'element_iter'))
 
 
 class EditStack(Mapping[str, T]):

@@ -55,6 +55,8 @@ TODO: to be continued...
 - [PySide2](https://pypi.org/project/PySide2/)
 - [PySide](https://pypi.org/project/PySide/)
 - [PyAutoGUI](https://pypi.org/project/PyAutoGUI/)
+- [layoutx](https://pypi.org/project/layoutx/)
+- [tkdnd](https://github.com/petasis/tkdnd)
 
 #### Debug
 - [pytest](https://pypi.org/project/pytest/)

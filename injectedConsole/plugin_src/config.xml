@@ -1,5 +1,6 @@
 <tk m-title="configuration">
     <script type="text/python">
+    from copy import deepcopy
     from tkinter import filedialog
     from tkinter.font import Font
 
@@ -14,7 +15,7 @@
     def ask_save_config_dialog():
         val = ask_save_config()
         if val is not None:
-            config['configs'].append([val, config['config'].copy()])
+            config['configs'].append([val, deepcopy(config['config'])])
 
     def ask_load_config_dialog():
         ask_load_config()
@@ -80,11 +81,11 @@
 
     __app__.bind('&lt;Escape&gt;', lambda event: event.widget.quit())
     </script>
-    <toplevel name="ask_save_config" m-resizable="true, false">
+    <toplevel name-="ask_save_config" m-resizable="true, false">
         <script type="text/python">
         def confirm():
             target = namemap['ask_save_config']
-            setattr(target, '$data', input_sv.get())
+            setattr(target, '$data', namemap['input_sv'].get())
             target.destroy()
 
         def cancel():
@@ -93,11 +94,12 @@
             target.destroy()
         </script>
         <label text="Enter a config name" />
-        <entry textvariable="([(input_sv := tk.StringVar())])" />
+        <StringVar name-="input_sv" />
+        <entry textvariable="([input_sv])" />
         <button text="Cancel" command="([cancel])" m-pack="side=right" />
         <button text="Confirm" command="([confirm])" m-pack="side=right" />
     </toplevel>
-    <toplevel name="ask_load_config">
+    <toplevel name-="ask_load_config">
         <script type="text/python">
         def btn_click_del_lb_sel():
             target = namemap['lb2']
@@ -129,7 +131,7 @@
             </button>
         </frame>
         <MultiListbox 
-            name="lb2" 
+            name-="lb2" 
             header_list="([[('Label', 10, 'Double click to modify the label'), 
                          ('Config', 40, 'Double click to apply the value')]])"
             data="([config['configs']])"
@@ -156,7 +158,7 @@
             sels = event.widget.curselection()
             if sels:
                 selected = sels[0]
-                config['config'] = config['configs'][selected][1].copy()
+                config['config'] = deepcopy(config['configs'][selected][1])
                 set_config(config['config'])
                 namemap['ask_load_config'].destroy()
 
@@ -168,7 +170,7 @@
     <label text="Select a Shell" height="2" font="([font_bold_underline])">
         <Tooltip text="Select a shell to start (Missing dependencies will be automatically installed)" />
     </label>
-    <ttk.combobox name="cb_selsh" state="readonly" />
+    <ttk.combobox name-="cb_selsh" state="readonly" />
     <ttk.separator orient="horizontal" m-pack="fill=x" />
     <script type="text/python">
     def cb_set_shell(event):
@@ -188,7 +190,7 @@ It will deal with the following situations separately:
         </Tooltip>
     </label>
     <frame>
-        <StringVar value="ignore" name="startup_errors" />
+        <StringVar value="ignore" name-="startup_errors" />
         <label text="Errors" m-grid="row=0,column=0" font="([font_bold_underline])" >
             <Tooltip text="How to deal with errors?" />
         </label>
@@ -218,8 +220,8 @@ It will deal with the following situations separately:
             <Tooltip text="Move selected items down" />
         </button>
     </frame>
-    <DragDropListbox name="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
-    <scrollbar name="sc" orient="vertical" m-pack="side=left,fill=y"/>
+    <DragDropListbox name-="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
+    <scrollbar name-="sc" orient="vertical" m-pack="side=left,fill=y"/>
     <script type="text/python">
     def lb_startfile(event):
         path = event.widget.get(event.widget.curselection())

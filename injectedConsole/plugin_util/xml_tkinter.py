@@ -394,7 +394,7 @@ class TkinterXMLConfigParser:
             for k, v in el_attrib.items()
             if k.isidentifier()
                 and not k.startswith('_')
-                and k not in ('id', 'class', 'name')
+                and k not in ('id', 'class')
         )
 
         return pargs, kargs
@@ -421,7 +421,7 @@ class TkinterXMLConfigParser:
 
         el_attrib: MutableMapping = el.attrib
 
-        name = el_attrib.get('name', '')
+        name = el_attrib.get('name-', '')
         if name:
             namemap = globals.get('namemap', self._namemap)
             namemap[name] = widget
@@ -495,7 +495,10 @@ class TkinterXMLConfigParser:
             widget = widget_factory(*pargs, **kargs)
             self.namespace.setdefault('__app__', widget)
         else:
-            widget = widget_factory(parent, *pargs, **kargs)
+            if 'master' in kargs:
+                widget = widget_factory(*pargs, **kargs)
+            else:
+                widget = widget_factory(parent, *pargs, **kargs)
             try:
                 widget.pack()
             except:
@@ -563,7 +566,7 @@ class TkinterXMLConfigParser:
             parent.wait_window(widget)
             return getattr(widget, '$data', None)
 
-        name = el.attrib.get('name', '')
+        name = el.attrib.get('name-', '')
         if name:
             _globals[name] = call
             return call
