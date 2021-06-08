@@ -41,18 +41,18 @@ try:
 
     from cssselect.xpath import GenericTranslator # type: ignore
     from lxml.cssselect import CSSSelector # type: ignore
-    from lxml.etree import _Element as Element # type: ignore
-    from lxml.xpath import XPath # type: ignore
-    from plugin_util.lxmlparser import ( # type: ignore
-        html_fromstring, html_tostring, xml_fromstring, xml_tostring
-    )
-    _LXML_IMPORTED = True
+    from lxml.etree import _Element as Element, XPath # type: ignore
 except ImportError:
     from xml.etree.ElementTree import Element
     from plugin_util.htmlparser import ( # type: ignore
         html_fromstring, html_tostring, xml_fromstring, xml_tostring
     )
     _LXML_IMPORTED = False
+else:
+    from plugin_util.lxmlparser import ( # type: ignore
+        html_fromstring, html_tostring, xml_fromstring, xml_tostring
+    )
+    _LXML_IMPORTED = True
 
 
 T = TypeVar('T')
