@@ -34,6 +34,8 @@ os.chdir(_injectedConsole_PATH['outdir'])
 
 from plugin_help import function
 
+os.environ['env'] = function._ENVFILE
+
 shell: str = args.shell
 if shell == 'nbterm':
     function.start_nbterm()

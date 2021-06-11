@@ -14,8 +14,7 @@ import sys
 from contextlib import contextmanager
 from copy import deepcopy
 from importlib import import_module
-from os import chdir, path, remove, symlink
-from traceback import print_exc
+from os import path
 from typing import Final, Optional, Tuple
 from types import MappingProxyType
 
@@ -36,16 +35,6 @@ SHELLS: Final[Tuple[str, ...]] = (
     'jupyter lab',
     'jupyter notebook',
 )
-
-
-def _rm(path) -> bool:
-    try:
-        remove(path)
-        return True
-    except FileNotFoundError:
-        return True
-    except BaseException:
-        return False
 
 
 def _import_all(mod_name):
@@ -84,7 +73,7 @@ def get_config_gui(
     try:
         from plugin_util.xml_tkinter import TkinterXMLConfigParser
     except ImportError:
-        print_exc(file=sys.stdout)
+        __import__('traceback').print_exc(file=sys.stdout)
         print('WARNING:', 'Probably cannot import `tkinter` module, skipping configuration...')
         return {}
     if new_process:
@@ -127,7 +116,6 @@ def run(bc) -> Optional[int]:
 
     abortfile    = path.join(outdir, 'abort.exists')
     envfile      = path.join(outdir, 'env.py')
-    envfile_link = path.expanduser('~/env.py')
     argsfile     = path.join(outdir, 'args.pkl')
     mainfile     = path.join(this_plugin_dir, 'main.py')
 
@@ -181,34 +169,23 @@ else:
 
 del __builtins
 ''')
+    print('WARNING:', 'Created environment initialization script in file\n%r\n' %envfile)
 
-    try:
-        _rm(envfile_link)
-        symlink(envfile, envfile_link)
-    except:
-        print_exc(file=sys.stdout)
-        print('WARNING:', 'Failed to create a link to %r on your home directory'
-              ', this may cause some applications (e.g. spyder) unable '
-              'to load the environment.' % envfile_link)
+    __import__('os').chdir(outdir)
 
-    chdir(outdir)
+    shell = config.get('shell')
+    if shell == 'qtconsole':
+        function.start_qtconsole()
+    elif shell == 'spyder':
+        function.start_spyder()
+    else:
+        from plugin_util.terminal import start_terminal
 
-    try:
-        shell = config.get('shell')
-        if shell == 'qtconsole':
-            function.start_qtconsole()
-        elif shell == 'spyder':
-            function.start_spyder()
-        else:
-            from plugin_util.terminal import start_terminal
-
-            pickle.dump(config, open(argsfile, 'wb'))
-            args = [sys.executable, mainfile, '--args', argsfile]
-            if shell:
-                args.extend(('--shell', shell))
-            start_terminal(args)
-    finally:
-        _rm(envfile_link)
+        pickle.dump(config, open(argsfile, 'wb'))
+        args = [sys.executable, mainfile, '--args', argsfile]
+        if shell:
+            args.extend(('--shell', shell))
+        start_terminal(args)
 
     # check whether the console is aborted.
     if path.exists(abortfile):

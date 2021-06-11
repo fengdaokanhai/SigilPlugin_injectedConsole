@@ -17,7 +17,7 @@ import sys
 
 from contextlib import contextmanager
 from copy import deepcopy
-from os import _exit, path as _path
+from os import _exit, path as _path, environ
 from pickle import load as pickle_load, dump as pickle_dump
 from runpy import run_path
 from tempfile import NamedTemporaryFile
@@ -492,6 +492,15 @@ def start_spyder(
     _ensure_pyqt5()
     if not args:
         args = ('-w', _OUTDIR, '--window-title', 'RUN FIRST ➜ %run env')
+    if 'env' in prun_kwds:
+        env = prun_kwds['env']
+        env.update((k, v) for k, v in environ.items() if k not in env)
+    else:
+        env = prun_kwds.setdefault('env', environ.copy())
+    if _SYSTEM_IS_WINDOWS:
+        env['HOMEPATH'] = _OUTDIR
+    else:
+        env['HOME'] = _OUTDIR
     with _ctx_wrapper():
         _run_env_tips('spyder')
         return subprocess.run(
