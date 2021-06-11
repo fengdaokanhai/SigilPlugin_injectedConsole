@@ -10,6 +10,7 @@ __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 2)
 
 __all__ = [
+    'html_fromstring', 'html_tostring', 'xml_fromstring', 'xml_tostring', 
     'IterMatchInfo', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'edit', 
     'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 'edit_batch', 
     'edit_html_iter', 'edit_html_batch', 'EditStack', 'TextEditStack', 

@@ -141,7 +141,7 @@ def temp_sys_modules(
     mdir: Optional[PathType] = None, 
     clean: bool = True, 
     restore: bool = True, 
-    prefixes_not_clean: Tuple[str, ...] = tuple(set(__import__('site').PREFIXES)),
+    prefixes_not_clean: Tuple[str, ...] = (), 
 ):
     'Temporary sys.modules'
     sys_modules: Dict[str, ModuleType] = sys.modules

@@ -9,6 +9,7 @@ __all__ = ['DragDropListbox', 'MultiListbox', 'Tooltip']
 import tkinter
 
 from types import MappingProxyType
+from typing import Mapping
 
 
 class DragDropListbox(tkinter.Listbox):
@@ -140,7 +141,7 @@ class MultiListbox(tkinter.Frame):
         self.curIndex = None
 
     @property
-    def listboxes(self) -> MappingProxyType[str, tkinter.Listbox]:
+    def listboxes(self) -> Mapping[str, tkinter.Listbox]:
         return MappingProxyType(self._listbox_dict)
 
     def setCurrent(self, event):

@@ -528,7 +528,7 @@ def start_jupyter_lab(
 
 
 def start_python_shell(
-    shell: str = 'python', 
+    shell: Optional[str] = None, 
     namespace: Optional[dict] = None, 
     banner: str = '', 
 ) -> None:
@@ -554,7 +554,7 @@ def start_python_shell(
             _startup(namespace)
             setattr(builtins, '_injectedConsole_RUNPY', True)
 
-        start_specific_python_console(namespace, shell=shell)
+        start_specific_python_console(namespace, banner, shell)
         dump_wrapper()
     except BaseException:
         print(colored('[ERROR]', 'red', attrs=['bold']))

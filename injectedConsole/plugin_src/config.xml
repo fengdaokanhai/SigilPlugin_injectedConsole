@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <tk m-title="configuration">
     <script type="text/python">
     from copy import deepcopy

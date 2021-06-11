@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 8)
-__revision__ = 4
+__revision__ = 5
 __all__ = ['run']
 
 import builtins
@@ -15,11 +15,11 @@ from contextlib import contextmanager
 from copy import deepcopy
 from importlib import import_module
 from os import chdir, path, remove, symlink
+from traceback import print_exc
 from typing import Final, Optional, Tuple
 from types import MappingProxyType
 
 from plugin_util.run import run_in_process
-from plugin_util.xml_tkinter import TkinterXMLConfigParser
 
 
 MUDULE_DIR: Final[str] = path.dirname(path.abspath(__file__))
@@ -76,13 +76,23 @@ def get_config_tui() -> dict:
     raise NotImplementedError
 
 
-def get_config_gui(new_process: bool = True) -> dict:
+def get_config_gui(
+    # Tips: After closing the `tkinter` GUI in Mac OSX, it will get stuck, 
+    # so I specify to run the `tkinter` GUI in a new process.
+    new_process: bool = __import__('platform').system() == 'Darwin', 
+) -> dict:
+    try:
+        from plugin_util.xml_tkinter import TkinterXMLConfigParser
+    except ImportError:
+        print_exc(file=sys.stdout)
+        print('WARNING:', 'Probably cannot import `tkinter` module, skipping configuration...')
+        return {}
     if new_process:
         return run_in_process(get_config_gui, False)
     else:
         with _ctx_conifg() as config:
             if 'config' not in config:
-                config['config'] = {'shell': SHELLS[0], 'errors': 'ignore', 'startup': []}
+                config['config'] = {'shell': 'python', 'errors': 'ignore', 'startup': []}
             if 'configs' not in config:
                 config['configs'] = []
             namespace = _import_all('plugin_util.tkinter_extensions')
@@ -176,7 +186,7 @@ del __builtins
         _rm(envfile_link)
         symlink(envfile, envfile_link)
     except:
-        __import__('traceback').print_exc()
+        print_exc(file=sys.stdout)
         print('WARNING:', 'Failed to create a link to %r on your home directory'
               ', this may cause some applications (e.g. spyder) unable '
               'to load the environment.' % envfile_link)
@@ -184,7 +194,7 @@ del __builtins
     chdir(outdir)
 
     try:
-        shell = config['shell']
+        shell = config.get('shell')
         if shell == 'qtconsole':
             function.start_qtconsole()
         elif shell == 'spyder':
@@ -193,11 +203,10 @@ del __builtins
             from plugin_util.terminal import start_terminal
 
             pickle.dump(config, open(argsfile, 'wb'))
-            start_terminal([
-                sys.executable, mainfile, 
-                '--args', argsfile, 
-                '--shell', shell, 
-            ])
+            args = [sys.executable, mainfile, '--args', argsfile]
+            if shell:
+                args.extend(('--shell', shell))
+            start_terminal(args)
     finally:
         _rm(envfile_link)
 

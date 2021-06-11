@@ -12,7 +12,7 @@ from argparse import ArgumentParser
 
 ap = ArgumentParser(description='injectedConsole main.py')
 ap.add_argument('--args', required=True)
-ap.add_argument('--shell', help='shell will start')
+ap.add_argument('--shell', default=None, help='shell will start')
 ap.add_argument(
     '--prev-shell', help='previous shell, if failed to start [--shell], '
                          'it will return to [--prev-shell]'

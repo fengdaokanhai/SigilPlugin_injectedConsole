@@ -24,6 +24,11 @@ from types import CodeType, ModuleType
 from urllib.parse import unquote
 from urllib.request import urlopen, Request
 
+try:
+    PREFIXES = tuple(set(__import__('site').PREFIXES))
+except (AttributeError, ImportError):
+    PREFIXES = ()
+
 from .cm import ensure_cm
 from .temporary import temp_wdir, temp_sys_modules
 from .undefined import undefined 
@@ -160,7 +165,7 @@ def ctx_run(
     wdir: Optional[str] = None, 
     mainfile: Union[str, Tuple[str, ...]] = ('__main__.py', 'main.py', '__init__.py'),
     clean_sys_modules: bool = True,
-    prefixes_not_clean: Tuple[str, ...] = tuple(set(__import__('site').PREFIXES)),
+    prefixes_not_clean: Tuple[str, ...] = PREFIXES,
     restore_sys_modules: bool = True,
 ) -> Generator[Dict[str, Any], None, None]:
     '''Run a [file] / [mainfile in directory], from a [file] | [url] | [directory].
@@ -265,7 +270,7 @@ def ctx_load(
     wdir: Optional[str] = None,
     mainfile: Union[str, Tuple[str, ...]] = '__init__.py',
     as_sys_module: bool = False,
-    prefixes_not_clean: Tuple[str, ...] = tuple(set(__import__('site').PREFIXES)),
+    prefixes_not_clean: Tuple[str, ...] = PREFIXES,
 ) -> Generator[ModuleType, None, None]:
     '''Load a [module] | [package], from a [file] | [directory] | [url].
 

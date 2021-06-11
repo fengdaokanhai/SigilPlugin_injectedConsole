@@ -272,7 +272,7 @@ class TkinterXMLConfigParser:
         parser=None, 
         set_name_to_namespace: bool = False, 
     ) -> None:
-        self._text: str = open(path).read()
+        self._text: bytes = open(path, 'rb').read()
         self._root = fromstring(self._text, parser)
 
         if namespace is None:
@@ -293,10 +293,10 @@ class TkinterXMLConfigParser:
             ttk=ttk, 
         )
 
-        self._tk = self.parse_element(self._root)
+        self._tk: tkinter.Tk = self.parse_element(self._root)
 
     @property
-    def text(self):
+    def text(self) -> bytes:
         return self._text
 
     @property
@@ -304,7 +304,7 @@ class TkinterXMLConfigParser:
         return self._root
 
     @property
-    def tk(self):
+    def tk(self) -> tkinter.Tk:
         return self._tk
 
     @cached_property
