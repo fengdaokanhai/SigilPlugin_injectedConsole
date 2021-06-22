@@ -23,6 +23,11 @@ TODO: to be continued...
 
 ## Resources
 
+### Recommended softwares
+- [watchman](https://facebook.github.io/watchman/)
+- [kite](https://www.kite.com/)
+- [tabnine](https://www.tabnine.com/)
+
 ### Recommended modules
 
 #### Parser or Selector 
@@ -62,4 +67,11 @@ TODO: to be continued...
 - [pytest](https://pypi.org/project/pytest/)
 - [nose2](https://pypi.org/project/nose2/)
 - [birdseye](https://pypi.org/project/birdseye/)
+
+#### Static Type Check
+- [typeshed](https://github.com/python/typeshed)
+- [typeshed-client](https://pypi.org/project/typeshed-client/)
+- [mypy](https://pypi.org/project/mypy/)
+- [pytype](https://pypi.org/project/pytype/)
+- [pyre-check](https://pypi.org/project/pyre-check/)
 

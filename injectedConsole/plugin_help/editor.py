@@ -7,26 +7,25 @@ This module provides some functions for modifying files in the
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1, 2)
+__version__ = (0, 1, 3)
 
 __all__ = [
     'html_fromstring', 'html_tostring', 'xml_fromstring', 'xml_tostring', 
     'IterMatchInfo', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'edit', 
     'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 'edit_batch', 
-    'edit_html_iter', 'edit_html_batch', 'EditStack', 'TextEditStack', 
+    'edit_html_iter', 'edit_html_batch', 'EditCache', 'TextEditCache', 
 ]
 
 import sys
 
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager
 from enum import Enum
 from functools import partial
-from inspect import getfullargspec, CO_VARARGS
 from re import compile as re_compile, Match, Pattern
 from typing import (
-    cast, Any, Callable, ContextManager, Dict, Final, Generator, 
-    Iterable, Iterator, List, Mapping, NamedTuple, Optional, 
-    Tuple, TypeVar, Union, 
+    cast, Any, AnyStr, Callable, ContextManager, Dict, Final, 
+    Generator, Iterable, Iterator, List, Mapping, MutableMapping, 
+    NamedTuple, Optional, Tuple, TypeVar, Union, 
 )
 from types import MappingProxyType
 
@@ -57,29 +56,50 @@ else:
 
 
 T = TypeVar('T')
-PatternType = Union[bytes, str, Pattern]
+PatternType = Union[AnyStr, Pattern]
+
+_BC: Final[BookContainer] = function._EDIT_CONTAINER
+
+
+def _ensure_bc(
+    bc: Optional[BookContainer] = None, 
+    frame_back: int = 2, # positive integer
+) -> BookContainer:
+    '''Helper function to guarantee that the return value is 
+    `bookcontainer.BookContainer` type'''
+    if isinstance(bc, BookContainer):
+        return bc
+    elif bc is None:
+        try:
+            bc = sys._getframe(frame_back).f_globals['bc']
+            if not isinstance(bc, BookContainer):
+                raise TypeError
+        except (KeyError, TypeError):
+            bc = _BC
+        return bc
+    raise TypeError('Expected type %r, got %r' % (BookContainer, type(bc)))
 
 
 class IterMatchInfo(NamedTuple):
-    '''Context information wrapping for regular expression matches.
+    '''Context information wrapper for regular expression matches.
 
     - bc: The ePub editor object `BookContainer`. 
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    - manifest_id: The file's manifest id (listed in the OPF file)
-    - local_no: Number in the current file (from 1)
-    - global_no: Number in all files (from 1)
-    - file_no: Number of processed files (from 1)
-    - href: The file's OPF href 
-    - mimetype: The file's media type
-    - match: The regular expression match object
-    - string: The contents of the current file
+    - manifest_id: The file's manifest id (listed in the OPF file).
+    - local_no: Number in the current file (from 1).
+    - global_no: Number in all files (from 1).
+    - file_no: Number of processed files (from 1).
+    - href: The file's OPF href.
+    - mimetype: The file's media type.
+    - match: The regular expression match object.
+    - string: The contents of the current file.
     '''
     bc: BookContainer
     manifest_id: str
-    local_no: int
-    global_no: int
-    file_no: int
+    local_no: int  # unsigned integer
+    global_no: int # unsigned integer
+    file_no: int   # unsigned integer
     href: str
     mimetype: str
     match: Match
@@ -97,10 +117,10 @@ def re_iter(
     with regular expressions, and yield matches one by one.
 
     :param pattern: A regular expression pattern string or compiled object.
-    :param manifest_id_s: Manifest id collection, be located in OPF file,
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
         The XPath as following (the `namespace` depends on the specific situation):
             /namespace:package/namespace:manifest/namespace:item/@id
-        If `manifest_id_s` is None (the default), it will get with `bc.text_iter()`.
+        If `manifest_id_s` is None (the default), it will get by `bc.text_iter()`.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
@@ -125,42 +145,48 @@ def re_iter(
 
     :return: Generator, if `more_info` is True, then yield `IterMatchInfo` object, 
              else yield `Element` object.
+
+    Example::
+        # Print all text node match objects one by one
+        for text in re_iter(r'(?<=>)[^<]+'):
+            print(text)
     '''
-    fn = re_compile(pattern).finditer
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc))
+
+    fn: Callable = re_compile(pattern).finditer
+
     if manifest_id_s is None:
         manifest_id_s = (info[0] for info in bc.text_iter())
     elif isinstance(manifest_id_s, str):
-        manifest_id_s = manifest_id_s,
+        manifest_id_s = (manifest_id_s,)
 
     if more_info:
-        i = j = k = 1
+        local_no: int  = 1
+        global_no: int = 1
+        file_no: int   = 1
 
-        for id_ in manifest_id_s:
-            href = bc.id_to_href(id_)
-            mime = bc.id_to_mime(id_)
+        for fid in manifest_id_s:
+            href = bc.id_to_href(fid)
+            mime = bc.id_to_mime(fid)
             try:
-                string = bc.readfile(id_)
-                i = 1
-                for m in fn(string):
+                string = bc.readfile(fid)
+                local_no = 1
+                for match in fn(string):
                     yield IterMatchInfo(
-                        bc, id_, i, j, k, href, mime, m, string)
-                    i += 1
-                    j += 1
+                        bc, fid, local_no, global_no, file_no, 
+                        href, mime, match, string)
+                    local_no  += 1
+                    global_no += 1
             except:
                 if errors == 'skip':
                     continue
                 elif errors == 'raise':
                     raise
-            k += 1
+            file_no += 1
     else:
-        for id_ in manifest_id_s:
+        for fid in manifest_id_s:
             try:
-                string = bc.readfile(id_)
+                string = bc.readfile(fid)
                 yield from fn(string)
             except:
                 if errors == 'raise':
@@ -169,7 +195,7 @@ def re_iter(
 
 def re_sub(
     pattern: PatternType, 
-    repl='', 
+    repl: Union[AnyStr, Callable[[Match], AnyStr], Callable[[IterMatchInfo], AnyStr]], 
     manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
     errors: str = 'ignore', 
@@ -180,10 +206,14 @@ def re_sub(
 
     :param pattern: A regular expression pattern string or compiled object.
     :param repl: 
-    :param manifest_id_s: Manifest id collection, be located in OPF file,
+        `repl` can be either a string or a callable.
+        If it is a string, backslash escapes in it are processed.
+        If it is a callable, it's passed the specified object (see param `more_info`) 
+        and must return a replacement string to be used.
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
         The XPath as following (the `namespace` depends on the specific situation):
             /namespace:package/namespace:manifest/namespace:item/@id
-        If `manifest_id_s` is None (the default), it will get with `bc.text_iter()`.
+        If `manifest_id_s` is None (the default), it will get by `bc.text_iter()`.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
@@ -205,62 +235,70 @@ def re_sub(
             - mimetype: The file's media type
             - match: The regular expression match object
             - string: The contents of the current file
+
+    Example::
+        # clear all text nodes' text
+        re_sub(r'(?<=>)[^<]+', '')
     '''
-    fn = re_compile(pattern).sub
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc))
+
+    fn: Callable = re_compile(pattern).sub
+
     if manifest_id_s is None:
         manifest_id_s = (info[0] for info in bc.text_iter())
     elif isinstance(manifest_id_s, str):
-        manifest_id_s = manifest_id_s,
+        manifest_id_s = (manifest_id_s,)
 
     if callable(repl):
+        repl = cast(Callable[..., AnyStr], repl)
+
+        local_no: int = 1
+        global_no: int = 1
+        file_no: int = 1
+
         if more_info:
-            _repl = repl
-            def repl(m):
-                nonlocal i, j
+            def _repl(match):
+                nonlocal local_no, global_no
                 try:
-                    ret = _repl(IterMatchInfo(
-                        bc, id_, i, j, k, href, mime, m, string))
+                    ret = repl(IterMatchInfo(
+                        bc, fid, local_no, global_no, file_no, 
+                        href, mime, match, string))
                 except:
                     if errors == 'skip':
-                        j = old_j
+                        global_no = old_global_no
                         raise
                     elif errors == 'raise':
                         raise
                 else:
-                    i += 1
-                    j += 1
+                    local_no += 1
+                    global_no += 1
                     return ret
+        else:
+            _repl = repl
 
-        i = j = k = 1
-
-        for id_ in manifest_id_s:
-            old_j = j
-            i = 1
-            href = bc.id_to_href(id_)
-            mime = bc.id_to_mime(id_)
+        for fid in manifest_id_s:
+            old_global_no = global_no
+            local_no = 1
+            href = bc.id_to_href(fid)
+            mime = bc.id_to_mime(fid)
             try:
-                string = bc.readfile(id_)
-                string_new = fn(repl, string)
+                string = bc.readfile(fid)
+                string_new = fn(_repl, string)
                 if string != string_new:
-                    bc.writefile(id_, string_new)
+                    bc.writefile(fid, string_new)
             except:
                 if errors == 'skip':
                     continue
                 elif errors == 'raise':
                     raise
-            k += 1
+            file_no += 1
     else:
-        for id_ in manifest_id_s:
+        for fid in manifest_id_s:
             try:
-                string = bc.readfile(id_)
+                string = bc.readfile(fid)
                 string_new = fn(repl, string)
                 if string != string_new:
-                    bc.writefile(id_, string_new)
+                    bc.writefile(fid, string_new)
             except:
                 if errors == 'raise':
                     raise
@@ -279,48 +317,6 @@ class DoNotWriteBack(Exception):
     you can raise this exception'''
 
 
-class _Result(NamedTuple):
-    argcount: int
-    has_varargs: bool
-
-
-def _posargcount(func: Callable) -> Tuple[int, bool]:
-    code = getattr(func, '__code__', None)
-    if code:
-        return _Result(code.co_argcount, bool(code.co_flags & CO_VARARGS))
-    try:
-        argspec = getfullargspec(func)
-    except:
-        return _Result(0, False)
-    else:
-        return _Result(len(argspec.args), argspec.varargs is not None)
-
-
-def _make_standard_predicate(
-    predicate: Optional[Callable[..., bool]] = None,
-) -> Callable[[str, str, str], bool]:
-    if predicate is None:
-        def pred(manifest_id: str, href: str, mimetype: str) -> bool:
-            return True
-    else:
-        argcount, has_varargs = _posargcount(predicate)
-        if has_varargs or argcount >= 3:
-            def pred(manifest_id: str, href: str, mimetype: str) -> bool:
-                return (cast(Callable[..., bool], predicate))(manifest_id, href, mimetype)
-        elif argcount == 2:
-            def pred(manifest_id: str, href: str, mimetype: str) -> bool:
-                return (cast(Callable[..., bool], predicate))(manifest_id, href)
-        elif argcount == 1:
-            def pred(manifest_id: str, href: str, mimetype: str) -> bool:
-                return (cast(Callable[..., bool], predicate))(manifest_id)
-        else:
-            def pred(manifest_id: str, href: str, mimetype: str) -> bool:
-                return (cast(Callable[..., bool], predicate))()
-
-    pred.__name__ = 'predicate'
-    return pred
-
-
 def edit(
     manifest_id: str, 
     operate: Callable[..., Union[bytes, str]], 
@@ -328,10 +324,10 @@ def edit(
 ) -> bool:
     '''Read the file data, operate on, and then write the changed data back
 
-    :param manifest_id: Manifest id, be located in OPF file, 
+    :param manifest_id: Manifest id, is listed in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
-        /namespace:package/namespace:manifest/namespace:item/@id
-    :param operate: Take data in, operate on, and then return the changed data
+            /namespace:package/namespace:manifest/namespace:item/@id
+    :param operate: Take data in, operate on, and then return the changed data.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
@@ -339,11 +335,7 @@ def edit(
 
     :return: Is it successful?
     '''
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc))
 
     content = bc.readfile(manifest_id)
 
@@ -353,10 +345,13 @@ def edit(
         return False
     except WriteBack as exc:
         content_new = exc.data
+        if content_new is None:
+            return False
 
     if content != content_new:
         bc.writefile(manifest_id, content_new)
         return True
+
     return False
 
 
@@ -365,53 +360,61 @@ def ctx_edit(
     manifest_id: str, 
     bc: Optional[BookContainer] = None, 
     wrap_me: bool = False, 
-    extra_data: Optional[Mapping] = None, 
-) -> Generator[Union[None, dict, bytes, str], Any, bool]:
+) -> Generator[Union[dict, bytes, str], None, bool]:
     '''Read and yield the file data, and then take in and write back the changed data.
 
-    :param manifest_id: Manifest id, be located in OPF file, 
+    :param manifest_id: Manifest id, is listed in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
-        /namespace:package/namespace:manifest/namespace:item/@id
+            /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
     :param wrap_me: Whether to wrap up object, if True, return a dict containing keys 
                     ('manifest_id', 'data', 'write_back')
-    :param extra_data: If `wrap_me` is true and `extra_data` is not None, then update
-                       `extra_data` to the dictionary of return.
 
     :return: A context manager that returns the `data`
         if wrap_me:
-            data = {'manifest_id': manifest_id, 'data': bc.readfile(manifest_id)}
+            data: dict = {
+                'manifest_id': `manifest_id`, 
+                'data': bc.readfile(`manifest_id`), 
+                'write_back': True, 
+            }
         else:
-            data = bc.readfile(manifest_id)
+            data: Union[bytes, str] = bc.readfile(`manifest_id`)
 
     Example::
         def operations_on_content(data_old):
             ...
             return data_new
 
-        with ctx_edit(manifest_id, bc) as content:
+        with ctx_edit(`manifest_id`, `bc`) as content:
             content_new = operations_on_content(content)
-            if content != content_new:
+            # If you need writing back
+            if you_need_writing_back:
                 raise WriteBack(content_new)
+            else: # If you don't need writing back, just pass
+                pass
 
         # OR equivalent to
-        with ctx_edit(manifest_id, bc, wrap_me=True) as data:
+        with ctx_edit(`manifest_id`, `bc`, wrap_me=True) as data:
             content = data['data']
             content_new = operations_on_content(content)
-            if content == content_new:
-                del data['data']
-                # OR raise DoNotWriteBack
-            else:
+            # If you need writing back
+            if you_need_writing_back:
                 data['data'] = content_new
+            else: # If you don't need writing back
+                raise DoNotWriteBack
+                # OR equivalent to:
+                # data['write_back'] = False
+                # OR equivalent to:
+                ## del data['write_back']
+                # OR equivalent to:
+                ## data['data'] = None
+                # OR equivalent to:
+                ## del data['data']
     '''
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(2).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc, 3))
 
     content = bc.readfile(manifest_id)
 
@@ -422,27 +425,24 @@ def ctx_edit(
                 'data': content,
                 'write_back': True,
             }
-            if extra_data:
-                data.update(extra_data)
-            while (yield data) is not None:
-                pass
+            yield data
             if data.get('data') is None or not data.get('write_back'):
                 raise DoNotWriteBack
             content_new = data['data']
         else:
-            content_new = yield content
-            if content_new is None:
-                raise DoNotWriteBack
-            while (yield None) is not None:
-                pass
+            yield content
+            raise DoNotWriteBack
     except DoNotWriteBack:
         return False
     except WriteBack as exc:
         content_new = exc.data
+        if content_new is None:
+            return False
 
     if content != content_new:
         bc.writefile(manifest_id, content_new)
         return True
+
     return False
 
 
@@ -456,42 +456,41 @@ def ctx_edit_sgml(
     '''Read and yield the etree object (parsed from a xml file), 
     and then write back the above etree object.
 
-    :param manifest_id: Manifest id, be located in OPF file, 
+    :param manifest_id: Manifest id, is listed in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
-        /namespace:package/namespace:manifest/namespace:item/@id
+            /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
     :param fromstring: Parses an XML or SGML document or fragment from a string.
                        Returns the root node (or the result returned by a parser target).
-    :param fromstring: Serialize an element to an encoded string representation of its XML
-                       or SGML tree.
+    :param tostring: Serialize an element to an encoded string representation of its XML
+                     or SGML tree.
 
     Example::
         def operations_on_etree(etree):
             ...
 
-        with ctx_edit_sgml(manifest_id, bc) as etree:
+        with ctx_edit_sgml(`manifest_id`, `bc`) as etree:
             operations_on_etree(etree)
+            # If you don't need writing back
+            ## raise DoNotWriteBack
     '''
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(2).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc, 3))
 
     content = bc.readfile(manifest_id)
     tree = fromstring(content.encode('utf-8'))
 
     try:
-        if (yield tree) is not None:
-            raise DoNotWriteBack
+        yield tree
     except DoNotWriteBack:
         return False
     except WriteBack as exc:
         content_new = exc.data
-        if not isinstance(content_new, (bytes, bytearray, str)):
+        if content_new is None:
+            return False
+        elif not isinstance(content_new, (bytes, bytearray, str)):
             content_new = tostring(content_new)
     else:
         content_new = tostring(tree)
@@ -502,6 +501,7 @@ def ctx_edit_sgml(
     if content != content_new:
         bc.writefile(manifest_id, content_new)
         return True
+
     return False
 
 
@@ -510,12 +510,12 @@ def ctx_edit_html(
     manifest_id: str, 
     bc: Optional[BookContainer] = None, 
 ) -> Generator[Any, Any, bool]:
-    '''Read and yield the etree object (parsed from a html file), 
+    '''Read and yield the etree object (parsed from a (X)HTML file), 
     and then write back the above etree object.
 
-    :param manifest_id: Manifest id, be located in OPF file, 
+    :param manifest_id: Manifest id, is listed in OPF file, 
         The XPath as following (the `namespace` depends on the specific situation):
-        /namespace:package/namespace:manifest/namespace:item/@id
+            /namespace:package/namespace:manifest/namespace:item/@id
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
@@ -525,14 +525,12 @@ def ctx_edit_html(
         def operations_on_etree(etree):
             ...
 
-        with ctx_edit_html(manifest_id, bc) as etree:
+        with ctx_edit_html(`manifest_id`, `bc`) as etree:
             operations_on_etree(etree)
+            # If you don't need writing back
+            ## raise DoNotWriteBack
     '''
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(2).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc, 3))
 
     return (yield from ctx_edit_sgml.__wrapped__( # type: ignore
         manifest_id, 
@@ -548,22 +546,19 @@ def ctx_edit_html(
 def edit_iter(
     manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
-    predicate: Optional[Callable[..., bool]] = None, 
     wrap_me: bool = False, 
     yield_cm: bool = False, 
-) -> Generator:
+):
     '''Used to process a collection of specified files in ePub file one by one
 
-    :param manifest_id_s: Manifest id collection, be located in OPF file,
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
         The XPath as following (the `namespace` depends on the specific situation):
-        /namespace:package/namespace:manifest/namespace:item/@id
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get by `bc.manifest_iter()`.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
-                      continue processing.
     :param wrap_me: Will pass to function ctx_edit as keyword argument.
     :param yield_cm: Determines whether each iteration returns the context manager.
 
@@ -572,240 +567,232 @@ def edit_iter(
             ...
             return data_new
 
-        edit_worker = edit_iter(('id1', 'id2'), bc)
-        for content in edit_worker:
+        edit_worker = edit_iter(`manifest_id_s`, `bc`)
+        for fid, content in edit_worker:
             content_new = operations_on_content(content)
-            if content != content_new:
+            # NOTE: `content_new` can't be None
+            if you_need_writing_back:
                 edit_worker.send(content_new)
+            else: # If you don't need writing back, just pass
+                pass
 
         # OR equivalent to
-        for cm in edit_iter(('id1', 'id2'), bc, yield_cm=True):
+        for fid, data in edit_iter(`manifest_id_s`, `bc`, wrap_me=True):
+            content = data['data']
+            content_new = operations_on_content()
+            if you_need_writing_back:
+                data['data'] = content_new
+            else: # If you don't need writing back
+                data['write_back'] = False
+                # OR equivalent to:
+                ## del data['write_back']
+                # OR equivalent to:
+                ## data['data'] = None
+                # OR equivalent to:
+                ## del data['data']
+
+        # OR equivalent to
+        for fid, cm in edit_iter(`manifest_id_s`, `bc`, yield_cm=True):
             with cm as content:
                 content_new = operations_on_content()
-                if content != content_new:
+                if you_need_writing_back:
                     raise WriteBack(content_new)
-
-        # OR equivalent to
-        for data in edit_iter(('id1', 'id2'), bc, wrap_me=True):
-            content = data['data']
-            content_new = operations_on_content(content)
-            if content == content_new:
-                del data['data']
-            else:
-                data['data'] = content_new
+                else: # If you don't need writing back, just pass
+                    pass
+                    # OR equivalent to:
+                    ## raise DoNotWriteBack
     '''
-    predicate = _make_standard_predicate(predicate)
-
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc))
 
     if manifest_id_s is None:
-        it = bc.manifest_iter()
+        manifest_id_s = (info[0] for info in bc.manifest_iter())
     elif isinstance(manifest_id_s, str):
-        it = [(manifest_id_s, bc.id_to_href(manifest_id_s), bc.id_to_mime(manifest_id_s))]
-    else:
-        it = ((fid, bc.id_to_href(fid), bc.id_to_mime(fid)) 
-              for fid in manifest_id_s)
+        manifest_id_s = (manifest_id_s,)
 
-    for fid, href, mime in it:
-        if not predicate(fid, href, mime):
-            continue
-        extra_data = {'href': href, 'mimetype': mime}
+    for fid in manifest_id_s:
         if yield_cm:
-            yield ctx_edit(fid, bc, wrap_me=wrap_me, extra_data=extra_data)
+            yield fid, ctx_edit(fid, bc, wrap_me=wrap_me)
         else:
-            yield from ctx_edit.__wrapped__( # type: ignore
-                fid, bc, wrap_me=wrap_me, extra_data=extra_data)
+            with ctx_edit(fid, bc, wrap_me=wrap_me) as data:
+                recv_data = yield fid, data
+                if recv_data is not None:
+                    while True:
+                        send_data = recv_data
+                        recv_data = yield
+                        if recv_data is None:
+                            raise WriteBack(send_data)
 
 
 def edit_batch(
     operate: Callable, 
     manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
-    predicate: Optional[Callable[..., bool]] = None, 
-) -> Dict[str, bool]:
+) -> List[Tuple[str, bool]]:
     '''Used to process a collection of specified files in ePub file one by one
 
-    :param manifest_id_s: Manifest id collection, be located in OPF file,
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
         The XPath as following (the `namespace` depends on the specific situation):
-        /namespace:package/namespace:manifest/namespace:item/@id
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get by `bc.manifest_iter()`.
     :param operate: Take data in, operate on, and then return the changed data.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
-                      continue processing.
 
-    :return: Dictionary, keys are the manifest id of all processed files, values are whether 
-             an exception occurs when processing the corresponding file 
-             (whatever the file was modified or not).
+    :return: List of tuples, the 1st element of the tuple is the manifest id of the 
+             specified processed files, the 2nd element of the tuple is whether an 
+             exception occurs when processing the corresponding file.
 
     Example::
         def operations_on_content(data_old):
             ...
             return data_new
 
-        edit_batch(operations_on_content, ('id1', 'id2'), bc)
+        edit_batch(operations_on_content, `manifest_id_s`, `bc`)
     '''
-    predicate = _make_standard_predicate(predicate)
-
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    bc = cast(BookContainer, _ensure_bc(bc))
 
     if manifest_id_s is None:
-        it = bc.manifest_iter()
+        manifest_id_s = (info[0] for info in bc.manifest_iter())
     elif isinstance(manifest_id_s, str):
-        it = [(manifest_id_s, bc.id_to_href(manifest_id_s), bc.id_to_mime(manifest_id_s))]
-    else:
-        it = ((fid, bc.id_to_href(fid), bc.id_to_mime(fid)) 
-              for fid in manifest_id_s)
+        manifest_id_s = (manifest_id_s,)
 
-    success_status: Dict[str, bool] = {}
-    for fid, href, mime in it:
-        if not predicate(fid, href, mime):
-            continue
+    success_status: List[Tuple[str, bool]]
+    for fid in manifest_id_s:
         try:
-            data: dict
-            with ctx_edit(fid, bc, wrap_me=True) as data: # type: ignore
-                data['data'] = operate(data['data'])
-            success_status[fid] = True
+            with ctx_edit(fid, bc) as content:
+                raise WriteBack(operate(content))
+            success_status.append((fid, True))
         except:
-            success_status[fid] = False
+            success_status.append((fid, False))
     return success_status
 
 
 def edit_html_iter(
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
-    predicate: Optional[Callable[..., bool]] = None, 
     wrap_me: bool = False, 
     yield_cm: bool = False, 
-) -> Generator[Union[None, Element, dict], Any, None]:
-    '''Used to process a collection of specified html files in ePub file one by one
+):
+    '''Used to process a collection of specified (X)HTML files in ePub file one by one
 
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
+        The XPath as following (the `namespace` depends on the specific situation):
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get by `bc.text_iter()`.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
-                      continue processing.
     :param wrap_me: Whether to wrap up object, if True, return a dict containing keys 
-                    ('manifest_id', 'OPF_href', 'mimetype', 'etree', 'write_back')
+                    ('manifest_id', 'data', 'write_back')
     :param yield_cm: Determines whether each iteration returns the context manager.
 
     Example::
         def operations_on_etree(etree):
             ...
 
-        edit_worker = edit_html_iter(bc)
-        for etree in edit_worker:
+        edit_worker = edit_html_iter(`manifest_id_s`, `bc`)
+        for fid, etree in edit_worker:
             operations_on_etree(etree)
-            ## if no need to write back
-            # edit_worker.throw(DoNotWriteBack)
-            ## OR
-            # edit_worker.send(0)
+            # If you don't need writing back
+            ## edit_worker.throw(DoNotWriteBack)
 
         # OR equivalent to
-        for cm in edit_html_iter(bc, yield_cm=True):
+        for fid, data in edit_html_iter(`manifest_id_s`, `bc`, wrap_me=True):
+            operations_on_etree(data['etree'])
+            # If you don't need writing back
+            ## data['write_back'] = False
+            # OR equivalent to:
+            ## del data['write_back']
+            # OR equivalent to:
+            ## data['data'] = None
+            # OR equivalent to:
+            ## del data['data']
+
+        # OR equivalent to
+        for fid, cm in edit_html_iter(`manifest_id_s`, `bc`, yield_cm=True):
             with cm as etree:
                 operations_on_etree(etree)
-                ## if no need to write back
-                # raise DoNotWriteBack
-
-        # OR equivalent to
-        for data in edit_html_iter(bc, wrap_me=True):
-            operations_on_etree(data['etree'])
-            ## if no need to write back
-            # data['write_back'] = False
-            ## OR
-            # del data['write_back']
+                # If you don't need writing back
+                ## raise DoNotWriteBack
     '''
-    predicate = _make_standard_predicate(predicate)
+    bc = cast(BookContainer, _ensure_bc(bc))
 
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    if manifest_id_s is None:
+        manifest_id_s = (info[0] for info in bc.text_iter())
+    elif isinstance(manifest_id_s, str):
+        manifest_id_s = (manifest_id_s,)
 
-    for fid, href in bc.text_iter():
-        mime = bc.id_to_mime(fid)
-        if not predicate(fid, href, mime):
-            continue
+    for fid in manifest_id_s:
         if yield_cm:
-            yield ctx_edit_html(fid, bc)
+            yield fid, ctx_edit_html(fid, bc)
         else:
             with ctx_edit_html(fid, bc) as tree:
                 if wrap_me:
                     data = {
                         'manifest_id': fid, 
-                        'href': href, 
-                        'mimetype': mime, 
-                        'etree': tree,
-                        'write_back': True,
+                        'data': tree, 
+                        'write_back': True, 
                     }
-                    while (yield data) is not None:
-                        pass
-                    if not data.get('write_back', False):
-                        raise DoNotWriteBack
+                    recv_data = yield fid, data
+                    if recv_data is None:
+                        if data.get('data') is None or not data.get('write_back'):
+                            raise DoNotWriteBack
+                        raise WriteBack(data['data'])
                 else:
-                    while (yield tree) is not None:
-                        pass
+                    recv_data = yield fid, tree
+                if recv_data is not None:
+                    while True:
+                        send_data = recv_data
+                        recv_data = yield
+                        if recv_data is None:
+                            raise WriteBack(send_data)
 
 
 def edit_html_batch(
     operate: Callable[[Element], Any], 
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
     bc: Optional[BookContainer] = None, 
-    predicate: Optional[Callable[..., bool]] = None, 
-) -> Dict[str, bool]:
-    '''Used to process a collection of specified html files in ePub file one by one
+) -> List[Tuple[str, bool]]:
+    '''Used to process a collection of specified (X)HTML files in ePub file one by one
 
     :param operate: Take etree object in, operate on.
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
+        The XPath as following (the `namespace` depends on the specific situation):
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get by `bc.text_iter()`.
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                      (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
-                      continue processing.
 
-    :return: Dictionary, keys are the manifest id of all processed files, values are whether 
-             an exception occurs when processing the corresponding file 
-             (whatever the file was modified or not).
+    :return: List of tuples, the 1st element of the tuple is the manifest id of the 
+             specified processed files, the 2nd element of the tuple is whether an 
+             exception occurs when processing the corresponding file.
 
     Example::
         def operations_on_etree(etree):
             ...
 
-        edit_html_batch(operations_on_etree, bc)
+        edit_html_batch(operations_on_etree, `manifest_id_s`, `bc`)
     '''
-    predicate = _make_standard_predicate(predicate)
+    bc = cast(BookContainer, _ensure_bc(bc))
 
-    if bc is None:
-        try:
-            bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-        except KeyError:
-            bc = cast(BookContainer, function._EDIT_CONTAINER)
+    if manifest_id_s is None:
+        manifest_id_s = (info[0] for info in bc.text_iter())
+    elif isinstance(manifest_id_s, str):
+        manifest_id_s = (manifest_id_s,)
 
-    success_status: Dict[str, bool] = {}
-    for fid, href in bc.text_iter():
-        mime = bc.id_to_mime(fid)
-        if not predicate(fid, href, mime):
-            continue
+    success_status: List[Tuple[str, bool]]
+    for fid in manifest_id_s:
         try:
             with ctx_edit_html(fid, bc) as tree:
                 operate(tree)
-            success_status[fid] = True
+            success_status.append((fid, True))
         except:
-            success_status[fid] = False   
+            success_status.append((fid, False))
     return success_status
 
 
@@ -825,9 +812,9 @@ if _LXML_IMPORTED:
         '''
         bc: BookContainer
         manifest_id: str
-        local_no: int
-        global_no: int
-        file_no: int
+        local_no: int  # unsigned integer
+        global_no: int # unsigned integer
+        file_no: int   # unsigned integer
         href: str
         mimetype: str
         element: Element
@@ -861,12 +848,11 @@ if _LXML_IMPORTED:
                             f", int, str), got {val_cls}")
 
     def element_iter(
-        path: Union[str, XPath], 
+        path: Union[str, XPath] = 'descendant-or-self::*', 
         bc: Optional[BookContainer] = None, 
         seltype: Union[int, str, EnumSelectorType] = EnumSelectorType.cssselect, 
         namespaces: Optional[Mapping] = None, 
         translator: Union[str, GenericTranslator] = 'xml',
-        predicate: Optional[Callable[..., bool]] = None,
         more_info: bool = False,
     ) -> Union[Generator[Element, None, None], Generator[IterElementInfo, None, None]]:
         '''Traverse all (X)HTML files in epub, search the elements that match the path, 
@@ -885,9 +871,6 @@ if _LXML_IMPORTED:
                         accepted by `EnumSelectorType.of`, the return value called final value.
                         If its final value is `EnumSelectorType.xpath`, then parameter
                         `translator` is ignored.
-        :param predicate: If it is a callable, it will receive parameters in order (if possible)
-                        (`manifest_id`, `OPF_href`, `mimetype`), and then determine whether to 
-                        continue processing.
         :param namespaces: Prefix-namespace mappings used by `path`.
 
             To use CSS namespaces, you need to pass a prefix-to-namespace
@@ -934,88 +917,163 @@ if _LXML_IMPORTED:
         else:
             select = path
 
-        if bc is None:
-            try:
-                bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-            except KeyError:
-                bc = cast(BookContainer, function._EDIT_CONTAINER)
+        bc = cast(BookContainer, _ensure_bc(bc))
 
-        j: int = 0
+        global_no: int = 0
         data: dict
-        for k, data in enumerate(edit_html_iter(bc, predicate=predicate, wrap_me=True), 1): # type: ignore
-            tree = data['etree']
-            id_, href, mime = data['manifest_id'], data['href'], data['mimetype']
+        for file_no, (fid, tree) in enumerate(edit_html_iter(bc=bc), 1): # type: ignore
+            href = bc.id_to_href(fid)
+            mime = bc.id_to_mime(fid)
             els = select(tree)
             if not els:
                 del data['write_back']
                 continue
             if more_info:
-                for i, (j, el) in enumerate(enumerate(els, j + 1), 1):
+                for local_no, (global_no, el) in enumerate(enumerate(els, global_no + 1), 1):
                     yield IterElementInfo(
-                        bc, id_, i, j, k, href, mime, el, tree)
+                        bc, fid, local_no, global_no, file_no, href, mime, el, tree)
             else:
                 yield from els
 
     __all__.extend(('IterElementInfo', 'EnumSelectorType', 'element_iter'))
 
 
-class EditStack(Mapping[str, T]):
+class EditCache(MutableMapping[str, T]):
     '''Initialize an editing stack that can proxy accessing to 
     `bookcontainer.Bookcontainer` object.
-    The results of the editing stack are not immediately written back to the 
-    `bookcontainer.Bookcontainer` object, until the `__exit__` or `clear` 
-    methods are called, and then the editing stack is cleared.
+    The edited files' data of the editing stack are cached and not immediately 
+    written back to the `bookcontainer.Bookcontainer` object, until the `__exit__` 
+    method or the `clear` method are called, and then the editing stack is cleared.
 
-    Note: This can operate all the files declared in the OPF file in ePub.
+    NOTE: This can operate all the files declared in the OPF file in ePub.
+    NOTE: A manifest id is available or not, can be determined by `__contains__` method.
+    NOTE: If you need to directly operate on the corresponding `bookcontainer.Bookcontainer` 
+          object (e.g., delete a file), please clear this editcache first.
 
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
+
+    Example::
+        # Change 'utf-8' to 'UTF-8' in all (X)HTML texts
+        with EditCache(`bc`) as cache:
+            for fid, *_ in cache.bookcontainer.text_iter():
+                cache[fid] = cache[fid].replace('utf-8', 'UTF-8')
     '''
 
-    __context_factory__: Callable[[BookContainer, str], ContextManager] = \
-        lambda bc, fid: ctx_edit(fid, bc, wrap_me=True)
+    __context_factory__: Callable[[str, BookContainer], ContextManager] = lambda fid, bc: ctx_edit(fid, bc)
 
     def __init__(self, bc: Optional[BookContainer] = None) -> None:
-        if bc is None:
-            try:
-                bc = cast(BookContainer, sys._getframe(1).f_globals['bc'])
-            except KeyError:
-                bc = cast(BookContainer, function._EDIT_CONTAINER)
-
-        self._edit_stack: ExitStack = ExitStack()
+        bc = cast(BookContainer, _ensure_bc(bc))
+        self._exit_cbs: Dict[str, Tuple[ContextManager, Callable]]= {}
         self._data: Dict[str, T] = {}
         self._bc: BookContainer = bc
 
+    @contextmanager
+    def _cm(self, fid: str, bc: BookContainer, /) -> Generator[T, None, None]:
+        with type(self).__context_factory__(fid, bc) as data:
+            yield data
+            if fid in self._data:
+                raise WriteBack(self._data[fid])
+            else:
+                raise DoNotWriteBack
+
     @property
     def data(self) -> MappingProxyType:
-        'A dictionary as a set of file id: file data object pairs.'
+        '''A dictionary as a set of [file's manifest id]: [file data object] pairs.'''
         return MappingProxyType(self._data)
 
+    @property
+    def bookcontainer(self) -> BookContainer:
+        '''Internal `BookContainer` object. 
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+        '''
+        return self._bc
+
+    bc = bk = bookcontainer
+
+    def __contains__(self, fid):
+        'Determine whether `fid` is an available manifest id.'
+        return fid in self._bc._w.id_to_mime
+
     def __len__(self) -> int:
-        'Count of all available file id(s).'
+        '''Count of all available [files' manifest ids].'''
         return len(self._bc._w.id_to_mime)
 
     def __iter__(self) -> Iterator[str]:
-        '''Iterate over all available file id(s) 
-        (from `bookcontainer.Bookcontainer.manifest_iter`)'''
-        for fid, *_ in self._bc.manifest_iter():
-            yield fid
+        '''Iterate over all available [files' manifest ids] 
+        (roughly from `bookcontainer.Bookcontainer.manifest_iter`).'''
+        yield from self._bc._w.id_to_mime
 
     def iteritems(self) -> Iterator[Tuple[str, T]]:
-        '''Iterate over all files, and yield a tuple of file id and file 
-        data object (this will cause the file to be opened) at each time'''
+        '''Iterate over all files (manifest ids are offered by `__iter__` method), 
+        and yield a tuple of [file's manifest id] and [file data object] 
+        (this will cause the file to be opened) at each time'''
         for fid in self:
             yield fid, self[fid]
+
+    def itervalues(self) -> Iterator[T]:
+        '''Iterate over all files (manifest ids are offered by `__iter__` method), 
+        and yield [file data object] (this will cause the file to be opened) 
+        at each time'''
+        for fid in self:
+            yield self[fid]
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc_info) -> None:
+    def __exit__(self, *exc_info):
         'Write all opened files back, and clear the editing stack.'
-        self._data.clear()
-        self._edit_stack.__exit__(*exc_info)
+        try:
+            received_exc = exc_info[0] is not None
+
+            # We manipulate the exception state so it behaves as though
+            # we were actually nesting multiple with statements
+            frame_exc = sys.exc_info()[1]
+            def _fix_exception_context(new_exc, old_exc):
+                # Context may not be correct, so find the end of the chain
+                while True:
+                    exc_context = new_exc.__context__
+                    if exc_context is old_exc:
+                        # Context is already set correctly (see issue 20317)
+                        return
+                    if exc_context is None or exc_context is frame_exc:
+                        break
+                    new_exc = exc_context
+                # Change the end of the chain to point to the exception
+                # we expect it to reference
+                new_exc.__context__ = old_exc
+
+            # Callbacks are invoked in LIFO order to match the behaviour of
+            # nested context managers
+            suppressed_exc = False
+            pending_raise = False
+            for cm, cm_exit in self._exit_cbs.values():
+                try:
+                    if cm_exit(cm, *exc_info):
+                        suppressed_exc = True
+                        pending_raise = False
+                        exc_info = (None, None, None)
+                except:
+                    new_exc_info = sys.exc_info()
+                    # simulate the stack of exceptions by setting the context
+                    _fix_exception_context(new_exc_info[1], exc_info[1])
+                    pending_raise = True
+                    exc_info = new_exc_info
+            if pending_raise:
+                # bare "raise exc_info[1]" replaces our carefully set-up context
+                fixed_ctx = exc_info[1].__context__
+                try:
+                    raise exc_info[1]
+                except BaseException:
+                    exc_info[1].__context__ = fixed_ctx
+                    raise
+            return received_exc and suppressed_exc
+        finally:
+            self._data.clear()
+            self._exit_cbs.clear()
 
     def clear(self) -> None:
         'Write all opened files back, and clear the editing stack.'
@@ -1024,25 +1082,54 @@ class EditStack(Mapping[str, T]):
     __del__ = clear
 
     def __getitem__(self, fid) -> T:
-        '''Receive a file's manifest id, return the contents of the file, 
-        otherwise raise KeyError'''
-        d = self._data
-        if fid not in d:
+        '''Receive a file's manifest id `fid`, return the corresponding 
+        of the file data object, otherwise raise `KeyError`.'''
+        data = self._data
+        if fid not in data:
             try:
-                d[fid] = self._edit_stack.enter_context(
-                    type(self).__context_factory__(self._bc, fid))
+                cm = type(self)._cm(self, fid, self._bc)
+                cm_type = type(cm)
+                data[fid] = cm_type.__enter__(cm)
+                self._exit_cbs[fid] = (cm, cm_type.__exit__)
             except Exception as exc:
                 raise KeyError(fid) from exc
-        return d[fid]
+        return data[fid]
+
+    def __setitem__(self, fid, data) -> None:
+        '''Update the data of the corresponding manifest id `fid` to `data`.
+        There are 2 restrictions:
+            1. The manifest id `fid` must be available, otherwise raise `KeyError`.
+            2. The data type of `data` must the same as original data, 
+               otherwise raise `TypeError`.
+        '''
+        original_type = type(self._data[fid])
+        data_type = type(data)
+        if original_type is not data_type:
+            raise TypeError(
+                'The data type does not match. It must be the same as the data type of '
+                'the original data, expected %r, got %r.' % (original_type, data_type))
+        self._data[fid] = data
+
+    def __delitem__(self, fid) -> None:
+        '''If the manifest id `fid` available and the corresponding data were modified, 
+        then clear the modified data.'''
+        if fid in self._data:
+            del self._data[fid]
+            cm, cm_exit = self._exit_cbs.pop(fid)
+            try:
+                raise DoNotWriteBack
+            except:
+                cm_exit(cm, *sys.exc_info())
+
 
     def read_id(self, key) -> T:
         '''Receive a file's manifest id, return the contents of the file, 
-        otherwise raise KeyError'''
+        otherwise raise `KeyError`.'''
         return self[key]
 
     def read_href(self, key) -> T:
         '''Receive a file's OPF href, return the contents of the file, 
-        otherwise raise KeyError'''
+        otherwise raise `KeyError`'''
         try:
             return self[self._bc.href_to_id(key)]
         except Exception as exc:
@@ -1050,7 +1137,7 @@ class EditStack(Mapping[str, T]):
 
     def read_basename(self, key) -> T:
         '''Receive a file's basename (with extension), return the 
-        contents of the file, otherwise raise KeyError'''
+        contents of the file, otherwise raise `KeyError`'''
         try:
             return self[self._bc.basename_to_id(key)]
         except Exception as exc:
@@ -1058,38 +1145,52 @@ class EditStack(Mapping[str, T]):
 
     def read_bookpath(self, key) -> T:
         '''Receive a file's bookpath (aka 'book_href' aka 'bookhref'), 
-        return the contents of the file, otherwise raise KeyError'''
+        return the contents of the file, otherwise raise `KeyError`'''
         try:
             return self[self._bc.bookpath_to_id(key)]
         except Exception as exc:
             raise KeyError(key) from exc
 
 
-class TextEditStack(EditStack[T]):
+class TextEditCache(EditCache[T]):
     '''Initialize an editing stack that can proxy accessing to 
     `bookcontainer.Bookcontainer` object.
-    The results of the editing stack are not immediately written back to the 
-    `bookcontainer.Bookcontainer` object, until the `__exit__` or `clear` 
-    methods are called, and then the editing stack is cleared.
+    The edited files' data of the editing stack are cached and not immediately 
+    written back to the `bookcontainer.Bookcontainer` object, until the `__exit__` 
+    method or the `clear` method are called, and then the editing stack is cleared.
 
-    Note: This can operate all the text (HTML / XHTML only) files 
-          declared in the OPF file in ePub.
+    NOTE: This can operate all the text (HTML / XHTML only) files declared 
+          in the OPF file in ePub.
+    NOTE: A manifest id is available or not, can be determined by `__contains__` method.
+    NOTE: If you need to directly operate on the corresponding `bookcontainer.Bookcontainer` 
+          object (e.g., delete a file), please clear this editcache first.
 
     :param bc: `BookContainer` object. 
         If it is None (the default), will be found in caller's globals().
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
-    '''
 
-    __context_factory__ = ctx_edit_html
+    Example::
+        # Delete the first <title> element that appears in each (X)HTML etree
+        with TextEditCache(`bc`) as cache:
+            for fid, tree in cache.iteritems():
+                el_title = tree.find('.//title')
+                if el_title is not None:
+                    el_title.getparent().remove(el_title)
+    '''
+    __context_factory__: Callable[[str, BookContainer], ContextManager] = ctx_edit_html
+
+    def __contains__(self, fid):
+        'Determine whether `fid` is an available manifest id.'
+        return fid in iter(self)
 
     def __len__(self) -> int:
-        'Count of all available file id(s) (HTML / XHTML only).'
+        '''Count of all available [files' manifest ids] (HTML / XHTML only).'''
         return sum(1 for _ in self._bc.text_iter())
 
     def __iter__(self) -> Iterator[str]:
-        '''Iterate over all available file id(s)
-        (from `bookcontainer.Bookcontainer.text_iter`)'''
+        '''Iterate over all available [files' manifest ids] (HTML / XHTML only)
+        (from `bookcontainer.Bookcontainer.text_iter`).'''
         for fid, *_ in self._bc.text_iter():
             yield fid
 

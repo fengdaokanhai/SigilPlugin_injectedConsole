@@ -1,10 +1,11 @@
 #!/bin/sh
 PROJDIR=`dirname "$0"`
+PROJNAME=injectedConsole
 CURDIR=`pwd`
 
 cd $PROJDIR
 
-if [ -f $PROJDIR/VERSION ];
+if [ -f $PROJDIR/VERSION ]
 then
     VERSION=`cat $PROJDIR/VERSION`
 else
@@ -12,8 +13,8 @@ else
 fi
 
 function createpack() {
-    local file=$1/injectedConsole_$VERSION.zip
-    if zip -q -r $file injectedConsole/
+    local file=$1/${PROJNAME}_${VERSION}.zip
+    if zip -q -r $file $PROJNAME
     then
         echo "Create a package file located in \n\t$file"
     else

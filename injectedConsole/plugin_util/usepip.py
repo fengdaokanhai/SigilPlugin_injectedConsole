@@ -12,7 +12,6 @@ __version__ = (0, 0, 4)
 import platform
 import subprocess
 
-from os import path
 from sys import executable
 from tempfile import NamedTemporaryFile
 from typing import Final, Iterable, List, Optional, Union
@@ -51,7 +50,13 @@ def check_pip(ensure: bool = True) -> bool:
             # [site.USER_BASE](https://docs.python.org/3/library/site.html#site.USER_BASE)
             # USER_SITE: Path to the user site-packages for the running Python.
             # [site.USER_SITE](https://docs.python.org/3/library/site.html#site.USER_SITE)
+            # NOTE: I found that the following file has a function `create_site_py`, `create_site_py` creates a site.py, 
+            #       it is the actual imported `site` module in Windows platform, but there are lot of missing things: 
+            # https://github.com/Sigil-Ebook/Sigil/blob/master/src/Resource_Files/python_pkg/windows_python_gather.py
             from site import USER_BASE, USER_SITE
+            # TODO: I need to confirm whether the `site` built-in module exists in Windows platform, 
+            #       if so, I can find out the values of `USER_BASE` and `USER_SITE` that are not missing, 
+            #       otherwise, I may try to construct available values for `USER_BASE` and `USER_SITE`.
         except ImportError:
             print('''Defective Python executable detected.
 Please replace current Python executable with another Python executable with `pip` package 

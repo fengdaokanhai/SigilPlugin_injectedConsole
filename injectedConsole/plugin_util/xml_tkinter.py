@@ -21,6 +21,7 @@ from functools import cached_property, partial
 from importlib import import_module
 from os import PathLike
 from re import compile as re_compile, Match, Pattern
+from textwrap import dedent
 from types import MappingProxyType, ModuleType
 from typing import (
     cast, Callable, Container, Dict, Final, Generator, Iterable, 
@@ -211,7 +212,7 @@ def parse_arg_token(
     elif group in ('EVAL', 'EVAL2'):
         return eval(value, globals, locals) if value.strip() else None
     elif group in ('EXEC', 'EXEC2'):
-        exec(script_removeprefix(value), globals, locals)
+        exec(dedent(value), globals, locals)
         return None
     elif group in ('LAMBDA', 'LAMBDA2'):
         if value.strip():
@@ -250,17 +251,6 @@ def parse_args(
             key: parse_arg_token(arg, globals, locals)
             for key, arg in kargs.items()
         }
-
-
-def script_removeprefix(script: str, _cre=re_compile('^[ \t]*')):
-    rl = [r for r in script.splitlines() if r.strip()]
-    ws_prefix = min(_cre.match(r)[0] for r in rl)
-    try:
-        removeprefix = str.removeprefix
-    except AttributeError:
-        # Adapting to Python 3.8 or lower
-        removeprefix = lambda s, p, /: s[len(p):] if s.startswith(p) else s
-    return '\n'.join(removeprefix(r, ws_prefix) for r in rl)
 
 
 class TkinterXMLConfigParser:
@@ -374,7 +364,7 @@ class TkinterXMLConfigParser:
 
         script_str = el_attrib.get('script-', '')
         if script_str.strip():
-            exec(script_removeprefix(script_str), globals, locals)
+            exec(dedent(script_str), globals, locals)
 
         for k, v in el_attrib.items():
             if k.startswith('_'):
@@ -629,7 +619,7 @@ class TkinterXMLConfigParser:
 
             script_str = child_attrib.get('script-', '')
             if script_str.strip():
-                exec(script_removeprefix(script_str), globals, locals)
+                exec(dedent(script_str), globals, locals)
 
             args_str = child_attrib.get('args-')
             pargs: tuple
@@ -702,7 +692,7 @@ class TkinterXMLConfigParser:
     ):
         script = el.text
 
-        source = script_removeprefix(script)
+        source = dedent(script)
         module_name = el.attrib.get('module')
 
         if globals is None:

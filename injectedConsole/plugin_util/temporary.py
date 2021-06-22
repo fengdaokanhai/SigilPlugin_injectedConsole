@@ -20,6 +20,13 @@ __all__ = ['temp_dict', 'temp_list', 'temp_set', 'temp_wdir', 'temp_namespace',
            'temp_sys_modules', 'temp_dir', 'temp_file']
 
 
+_PREFIXES: Tuple[str, ...]
+try:
+    _PREFIXES = tuple(__import__('site').PREFIXES)
+except (ImportError, AttributeError):
+    from sys import prefix, exec_prefix
+    _PREFIXES = (prefix, exec_prefix)
+
 PathType = Union[str, bytes, os.PathLike]
 
 
@@ -141,7 +148,7 @@ def temp_sys_modules(
     mdir: Optional[PathType] = None, 
     clean: bool = True, 
     restore: bool = True, 
-    prefixes_not_clean: Tuple[str, ...] = (), 
+    prefixes_not_clean: Tuple[str, ...] = _PREFIXES, 
 ):
     'Temporary sys.modules'
     sys_modules: Dict[str, ModuleType] = sys.modules
