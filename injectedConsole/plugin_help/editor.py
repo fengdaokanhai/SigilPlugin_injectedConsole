@@ -93,7 +93,7 @@ class IterMatchInfo(NamedTuple):
     - href: The file's OPF href.
     - mimetype: The file's media type.
     - match: The regular expression match object.
-    - string: The contents of the current file.
+    - string: The content of the current file.
     '''
     bc: BookContainer
     manifest_id: str
@@ -127,8 +127,8 @@ def re_iter(
         which can be used to access and operate the files in ePub.
     :param errors: Strategies for errors, it can take a value in ('ignore', 'raise', 'skip').
         - ignore: Ignore the error and continue processing, but the number will increase.
-        - raise: Ignore the error and continue processing, the number will not increase.
-        - skip: Raise the error and stop processing.
+        - skip: Ignore the error and continue processing, the number will not increase.
+        - raise: Raise the error and stop processing.
     :param more_info: 
         If false, the yielding results are the match object of the regular expression,
         else the yielding results are the namedtuple `IterMatchInfo` objects, 
@@ -141,7 +141,7 @@ def re_iter(
             - href: The file's OPF href 
             - mimetype: The file's media type
             - match: The regular expression match object
-            - string: The contents of the current file
+            - string: The content of the current file
 
     :return: Generator, if `more_info` is True, then yield `IterMatchInfo` object, 
              else yield `Element` object.
@@ -220,8 +220,8 @@ def re_sub(
         which can be used to access and operate the files in ePub.
     :param errors: Strategies for errors, it can take a value in ('ignore', 'raise', 'skip').
         - ignore: Ignore the error and continue processing, but the number will increase.
-        - raise: Ignore the error and continue processing, the number will not increase.
-        - skip: Raise the error and stop processing.
+        - skip: Ignore the error and continue processing, the number will not increase.
+        - raise: Raise the error and stop processing.
     :param more_info: This parameter only takes effect when `repl` is a callable.
         If false, the argument was passed to the `repl` function is the match object of the regular expression,
         else the argument was passed to the `repl` function is the namedtuple `IterMatchInfo` object, 
@@ -234,7 +234,7 @@ def re_sub(
             - href: The file's OPF href 
             - mimetype: The file's media type
             - match: The regular expression match object
-            - string: The contents of the current file
+            - string: The content of the current file
 
     Example::
         # clear all text nodes' text
@@ -939,11 +939,11 @@ if _LXML_IMPORTED:
 
 
 class EditCache(MutableMapping[str, T]):
-    '''Initialize an editing stack that can proxy accessing to 
+    '''Initialize an `EditCache` object that can proxy accessing to 
     `bookcontainer.Bookcontainer` object.
-    The edited files' data of the editing stack are cached and not immediately 
+    The edited files' data of this `EditCache` object are cached and not immediately 
     written back to the `bookcontainer.Bookcontainer` object, until the `__exit__` 
-    method or the `clear` method are called, and then the editing stack is cleared.
+    method or the `clear` method are called, and then this `EditCache` object is cleared.
 
     NOTE: This can operate all the files declared in the OPF file in ePub.
     NOTE: A manifest id is available or not, can be determined by `__contains__` method.
@@ -1025,7 +1025,7 @@ class EditCache(MutableMapping[str, T]):
         return self
 
     def __exit__(self, *exc_info):
-        'Write all opened files back, and clear the editing stack.'
+        'Write all opened files back, and clear the `EditCache` object.'
         try:
             received_exc = exc_info[0] is not None
 
@@ -1076,7 +1076,7 @@ class EditCache(MutableMapping[str, T]):
             self._exit_cbs.clear()
 
     def clear(self) -> None:
-        'Write all opened files back, and clear the editing stack.'
+        'Write all opened files back, and clear the `EditCache` object.'
         self.__exit__(*sys.exc_info())
 
     __del__ = clear
@@ -1123,12 +1123,12 @@ class EditCache(MutableMapping[str, T]):
 
 
     def read_id(self, key) -> T:
-        '''Receive a file's manifest id, return the contents of the file, 
+        '''Receive a file's manifest id, return the content of the file, 
         otherwise raise `KeyError`.'''
         return self[key]
 
     def read_href(self, key) -> T:
-        '''Receive a file's OPF href, return the contents of the file, 
+        '''Receive a file's OPF href, return the content of the file, 
         otherwise raise `KeyError`'''
         try:
             return self[self._bc.href_to_id(key)]
@@ -1137,7 +1137,7 @@ class EditCache(MutableMapping[str, T]):
 
     def read_basename(self, key) -> T:
         '''Receive a file's basename (with extension), return the 
-        contents of the file, otherwise raise `KeyError`'''
+        content of the file, otherwise raise `KeyError`'''
         try:
             return self[self._bc.basename_to_id(key)]
         except Exception as exc:
@@ -1145,7 +1145,7 @@ class EditCache(MutableMapping[str, T]):
 
     def read_bookpath(self, key) -> T:
         '''Receive a file's bookpath (aka 'book_href' aka 'bookhref'), 
-        return the contents of the file, otherwise raise `KeyError`'''
+        return the content of the file, otherwise raise `KeyError`'''
         try:
             return self[self._bc.bookpath_to_id(key)]
         except Exception as exc:
@@ -1153,11 +1153,11 @@ class EditCache(MutableMapping[str, T]):
 
 
 class TextEditCache(EditCache[T]):
-    '''Initialize an editing stack that can proxy accessing to 
+    '''Initialize an `TextEditCache` object that can proxy accessing to 
     `bookcontainer.Bookcontainer` object.
-    The edited files' data of the editing stack are cached and not immediately 
+    The edited files' data of this `TextEditCache` object are cached and not immediately 
     written back to the `bookcontainer.Bookcontainer` object, until the `__exit__` 
-    method or the `clear` method are called, and then the editing stack is cleared.
+    method or the `clear` method are called, and then this `TextEditCache` object is cleared.
 
     NOTE: This can operate all the text (HTML / XHTML only) files declared 
           in the OPF file in ePub.

@@ -3,11 +3,11 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 8)
-__revision__ = 6
+__revision__ = 7
 
 import sys
-
-assert sys.version_info >= (3, 8), 'Python version at least 3.8, got\n%s' % sys.version
+if sys.version_info < (3, 8):
+    raise RuntimeError('Python version at least 3.8, got\n%s' % sys.version)
 
 from plugin_run import run
 

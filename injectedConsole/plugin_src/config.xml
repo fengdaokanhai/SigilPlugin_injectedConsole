@@ -47,10 +47,7 @@
             namemap['lb'].insert(tk.END, directory)
 
     def click_del_sel():
-        sels = namemap['lb'].curselection()
-        if sels:
-            for sel in reversed(sels):
-                namemap['lb'].delete(sel)
+        namemap['lb'].onKeyBackSpace()
 
     def click_clear():
         namemap['lb'].delete(0, tk.END)
@@ -103,15 +100,10 @@
     <toplevel name-="ask_load_config">
         <script type="text/python">
         def btn_click_del_lb_sel():
-            target = namemap['lb2']
-            sels = target.curselection()
-            if sels:
-                for sel in reversed(sels):
-                    target.delete(sel)
+            namemap['lb2'].onKeyBackSpace()
 
         def btn_click_lb_clear():
-            target = namemap['lb2']
-            target.delete(0, tk.END)
+            namemap['lb2'].delete(0, tk.END)
 
         def click_move_up():
             namemap['lb2'].onKeyUp()
@@ -120,8 +112,12 @@
             namemap['lb2'].onKeyDown()
          </script>
         <frame>
-            <button text="Delete Selected" width="10" command="([btn_click_del_lb_sel])" m-pack="side=left" />
-            <button text="Clear All" width="10" command="([btn_click_lb_clear])" m-pack="side=left" />
+            <button text="Delete Selected" width="15" command="([btn_click_del_lb_sel])" m-pack="side=left">
+                <Tooltip text="Delete Selected" />
+            </button>
+            <button text="Clear All" width="15" command="([btn_click_lb_clear])" m-pack="side=left">
+                <Tooltip text="Clear All" />
+            </button>
         </frame>
         <frame>
             <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" >
@@ -206,12 +202,20 @@ It will deal with the following situations separately:
         </radiobutton>
     </frame>
     <frame>
-        <button text="Add Files" width="10" command="([click_add_file])" m-pack="side=left" />
-        <button text="Add Folder" width="10" command="([click_add_dir])" m-pack="side=left" />
+        <button text="Add Files" width="15" command="([click_add_file])" m-pack="side=left">
+            <Tooltip text="Add Files" />
+        </button>
+        <button text="Add Folder" width="15" command="([click_add_dir])" m-pack="side=left">
+            <Tooltip text="Add Folder" />
+        </button>
     </frame>
     <frame>
-        <button text="Delete Selected" width="10" command="([click_del_sel])" m-pack="side=left" />
-        <button text="Clear All" width="10" command="([click_clear])" m-pack="side=left" />
+        <button text="Delete Selected" width="15" command="([click_del_sel])" m-pack="side=left">
+            <Tooltip text="Delete Selected" />
+        </button>
+        <button text="Clear All" width="15" command="([click_clear])" m-pack="side=left">
+            <Tooltip text="Clear All" />
+        </button>
     </frame>
     <frame>
         <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" >

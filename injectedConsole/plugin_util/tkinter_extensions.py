@@ -12,6 +12,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 
+# TODO: Support [TkinterDnD2](http://tkinterdnd.sourceforge.net/)
 class DragDropListbox(tkinter.Listbox):
 
     def __init__(self, *args, data=None, **kwds):
@@ -26,6 +27,7 @@ class DragDropListbox(tkinter.Listbox):
         self.bind('<B1-Motion>', self.shiftSelection)
         self.bind("<Up>", self.onKeyUp)
         self.bind("<Down>", self.onKeyDown)
+        self.bind("<BackSpace>", self.onKeyBackSpace)
 
     def delete(self, first, last=None):
         super().delete(first, last)
@@ -91,6 +93,15 @@ class DragDropListbox(tkinter.Listbox):
             self.selection_set(insert_pos, insert_pos + len(items) - 1)
         return "break"
 
+    def onKeyBackSpace(self, event=None):
+        if event is None:
+            sels = self.curselection()
+        else:
+            sels = event.widget.curselection()
+        if sels:
+            for sel in reversed(sels):
+                self.delete(sel)
+
 
 class MultiListbox(tkinter.Frame):
 
@@ -121,6 +132,7 @@ class MultiListbox(tkinter.Frame):
             lb.bind('<MouseWheel>', self.onMouseWheel)
             lb.bind("<Up>", self.onKeyUp)
             lb.bind("<Down>", self.onKeyDown)
+            lb.bind("<BackSpace>", self.onKeyBackSpace)
             #lb.bind("<Leave>", lambda e: "break")
             lb.bind("<B2-Motion>", lambda e, _f=self._b2motion: _f(e.x, e.y))
             lb.bind("<Button-2>", lambda e, _f=self._button2: _f(e.x, e.y))
@@ -200,6 +212,15 @@ class MultiListbox(tkinter.Frame):
             self.insert(insert_pos, *items)
             self.selection_set(insert_pos, insert_pos + len(items) - 1)
         return "break"
+
+    def onKeyBackSpace(self, event=None):
+        if event is None:
+            sels = self.curselection()
+        else:
+            sels = event.widget.curselection()
+        if sels:
+            for sel in reversed(sels):
+                self.delete(sel)
 
     def _button2(self, x, y):
         for l in self._listbox_list:

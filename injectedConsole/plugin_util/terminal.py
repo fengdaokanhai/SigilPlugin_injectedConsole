@@ -9,17 +9,27 @@
 
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 2)
+__version__ = (0, 0, 3)
 
+import json
 import platform
 import re
+import socket
 
+from contextlib import contextmanager
 from enum import Enum
-from os import remove
+from os import environ, getcwd, getpid, remove, path as _path
 from shlex import quote as shlex_quote
-from subprocess import run as sprun, CalledProcessError, CompletedProcess, PIPE
+from subprocess import run as sprun, CompletedProcess
 from tempfile import NamedTemporaryFile
-from typing import cast, Dict, List, Optional, Sequence, Union
+from time import perf_counter
+from typing import (
+    cast, Dict, Final, List, Optional, Sequence, Tuple, Union
+)
+
+from .cm import ensure_cm
+from .shell_util import exists_execfile
+from .run import wait_for_pid
 
 try:
     from shlex import join as shlex_join # type: ignore
@@ -30,13 +40,16 @@ except ImportError:
 
 
 __all__ = ['start_terminal', 'shlex_quote', 'shlex_join', 'winsh_quote', 'winsh_join', 
-           'get_debian_default_app', 'set_debian_default_app', 'start_windows_terminal', 
-           'start_linux_terminal', 'AppleScriptWaitEvent', 'start_macosx_terminal', 
-           'open_macosx_terminal']
+           'start_windows_terminal', 'start_linux_terminal', 'AppleScriptWaitEvent', 
+           'start_macosx_terminal', 'open_macosx_terminal']
+
+
+_CURDIR: Final[str] = getcwd()
+_ENV_WAIT_PID_FILE = _path.join(_CURDIR, 'env_wait_pid.json')
 
 
 def winsh_quote(part, _cre=re.compile(r'\s')):
-    ''
+    'Return a shell-escaped string.'
     part = part.strip().replace(r'"', r'\"')
     if _cre.search(part) is not None:
         part = r'"%s"' % part
@@ -44,31 +57,12 @@ def winsh_quote(part, _cre=re.compile(r'\s')):
 
 
 def winsh_join(split_command: Sequence[str]) -> str:
-    """Return a shell-escaped string from *split_command*."""
+    'Return a shell-escaped string from *split_command*.'
     return ' '.join(map(winsh_quote, split_command))
 
 
-def get_debian_default_app(field: Union[bytes, str]) -> Optional[str]:
-    ''
-    if isinstance(field, str):
-        field = field.encode('utf-8')
-    rt = sprun(
-        'update-alternatives --get-selections', 
-        check=True, shell=True, stdout=PIPE)
-    return next((
-        row.rsplit(maxsplit=1)[-1].decode('utf-8') 
-        for row in rt.stdout.split(b'\n') 
-        if row.startswith(b'%s '%field)
-    ), None)
-
-
-def set_debian_default_app(field: str) -> CompletedProcess:
-    ''
-    return sprun(['update-alternatives', '--config', field])
-
-
 def start_terminal(cmd, **kwargs) -> CompletedProcess:
-    ''
+    'Start a terminal emulator in current OS platform.'
     sys = platform.system()
     if sys == 'Windows':
         return start_windows_terminal(cmd, **kwargs)
@@ -89,7 +83,7 @@ def start_windows_terminal(
     with_tempfile: bool = False,
     tempfile_suffix: str = '.cmd',
 ) -> CompletedProcess:
-    ''
+    'Start a terminal emulator in Windows.'
     split_command: List[str] = ['start']
     if wait:
         split_command.append('/wait')
@@ -120,7 +114,10 @@ def start_windows_terminal(
         finally:
             # TODO: We may need to wait until the file is no longer 
             #       occupied before deleting it.
-            remove(f.name)
+            try:
+                remove(f.name)
+            except FileNotFoundError:
+                pass
     if isinstance(cmd, str):
         if app in ('powershell', 'powershell.exe') and cmd.strip():
             split_command.append('&')
@@ -137,51 +134,134 @@ def start_windows_terminal(
         return sprun(split_command, check=True, shell=True)
 
 
+@contextmanager
+def _wait_for_client(timeout=10):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    for port in range(10000, 65536):
+        try:
+            server.bind(('localhost', port))
+            break
+        except OSError:
+            pass
+    else:
+        raise OSError('cannot bind port 10000-65535')
+
+    server.settimeout(timeout)
+
+    json.dump({'port': port}, open(_ENV_WAIT_PID_FILE, 'w'))
+
+    pid: int = 0
+    try:
+        start_t = perf_counter()
+        yield port
+        try:
+            server.listen(1)
+            remain_t = timeout - (perf_counter() - start_t)
+            if remain_t > 0:
+                client, addr = server.accept()
+                try:
+                    pid = int(client.recv(1024) or 0)
+                finally:
+                    client.close()
+        except socket.timeout:
+            pass
+        finally:
+            server.close()
+    finally:
+        try:
+            remove(_ENV_WAIT_PID_FILE)
+        except FileNotFoundError:
+            pass
+
+    if pid:
+        wait_for_pid(pid)
+
+
+def _send_pid_to_server():
+    if not _path.exists(_ENV_WAIT_PID_FILE):
+        return
+
+    env = json.load(open(_ENV_WAIT_PID_FILE))
+    port = env['port']
+
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client.connect(('localhost', port))
+    except:
+        return
+    try:
+        client.send(str(getpid()).encode('ascii'))
+    finally:
+        client.close()
+
+
 def start_linux_terminal(
     cmd: Union[str, Sequence[str]], 
     app: Optional[str] = None, 
-    app_args: Union[None, Sequence[str]] = None,
-    with_tempfile: bool = False,
-    tempfile_suffix: str = '.sh',
-    shebang: str = '#!/bin/sh',
+    app_args: Union[None, Sequence[str]] = None, 
+    wait: bool = True, 
+    with_tempfile: bool = False, 
+    tempfile_suffix: str = '.sh', 
+    shebang: str = '#!/bin/sh', 
 ) -> CompletedProcess:
-    ''
+    'Start a terminal emulator in Linux.'
+    terminal_apps: Tuple[str, ...] = (
+        'x-terminal-emulator', # Debian Series
+        'gnome-terminal',      # GNOME
+        'konsole',             # KDE
+        'xfce4-terminal',      # XFCE
+        'lxterminal',          # LXDE
+        # Other popular terminal emulators
+        'terminator', 'rxvt', 'xterm', 
+    )
+
+    terminal_app_execute_args: Dict[str, List[str]] = {
+        # https://helpmanual.io/man1/x-terminal-emulator/
+        'x-terminal-emulator': ['-x'], 
+        # https://linuxcommandlibrary.com/man/gnome-terminal
+        'gnome-terminal': ['-x'], 
+        # https://linuxcommandlibrary.com/man/konsole
+        'konsole': ['-e'], 
+        # https://linuxcommandlibrary.com/man/xfce4-terminal
+        'xfce4-terminal': ['-x'], 
+        # https://linuxcommandlibrary.com/man/lxterminal
+        'lxterminal': ['-e'], 
+        # https://linux.die.net/man/1/terminator
+        'terminator': ['-x'], 
+        # https://linux.die.net/man/1/rxvt
+        'rxvt': ['-e'], 
+        # https://linux.die.net/man/1/xterm
+        'xterm': ['-e']
+    }
+
     if app is None:
-        try:
-            app = get_debian_default_app('x-terminal-emulator')
-        except CalledProcessError:
-            # TIPS: So far, automatically detect terminal is only for Debian series
+        for app in terminal_apps:
+            if exists_execfile(app):
+                break
+        else:
             raise NotImplementedError('Failed to detect the terminal app, '
                                       'please specify one')
-    if app is None:
-        raise RuntimeError('There is no default terminal app')
     split_command: List[str] = [app]
     if app_args is None:
-        # SUPPOSE: All apps except xterm have the -x(--execute) parameter 
-        #          to execute the command.
         app_name = app.rsplit('/', 1)[-1]
-        if app_name == 'gnome-terminal':
-            split_command.append('--wait')
-            split_command.append('--')
-        elif not app_name.endswith('xterm'):
-            split_command.append('-x')
-    else:
-        split_command.extend(app_args)
-    if with_tempfile:
-        with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
-            sprun(['chmod', '+x', f.name], check=True)
-            if not isinstance(cmd, str):
-                cmd = cast(str, shlex_join(cmd))
-            f.write('%s\n%s\n' % (shebang, cmd))
-            f.flush()
-            split_command.append(f.name)
+        app_args = cast(List[str], terminal_app_execute_args.get(app_name, []))
+    split_command.extend(app_args)
+    with ensure_cm(_wait_for_client() if wait else None) as port:
+        if with_tempfile:
+            with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
+                sprun(['chmod', '+x', f.name], check=True)
+                if not isinstance(cmd, str):
+                    cmd = cast(str, shlex_join(cmd))
+                f.write('%s\n%s\n' % (shebang, cmd))
+                f.flush()
+                split_command.append(f.name)
+                return sprun(split_command, check=True)
+        if isinstance(cmd, str):
+            return sprun(shlex_join(split_command) + ' ' + cmd, 
+                         check=True, shell=True)
+        else:
+            split_command.extend(cmd)
             return sprun(split_command, check=True)
-    if isinstance(cmd, str):
-        return sprun(shlex_join(split_command) + ' ' + cmd, 
-                     check=True, shell=True)
-    else:
-        split_command.extend(cmd)
-        return sprun(split_command, check=True)
 
 
 AppleScriptWaitEvent = Enum('AppleScriptWaitEvent', ('exists', 'busy'))
@@ -212,7 +292,7 @@ def start_macosx_terminal(
     tempfile_suffix: str = '.command',
     shebang: str = '#!/bin/sh',
 ) -> CompletedProcess:
-    ''
+    'Start a terminal emulator in MacOSX.'
     if not isinstance(cmd, str):
         cmd = cast(str, shlex_join(cmd))
     if wait:
@@ -247,7 +327,7 @@ def open_macosx_terminal(
     tempfile_suffix: str = '.command',
     shebang: str = '#!/bin/sh',
 ) -> CompletedProcess:
-    ''
+    'Start a terminal emulator in MacOSX.'
     split_command: List[str] = ['open']
     if wait:
         split_command.append('-W')

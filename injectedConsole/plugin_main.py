@@ -19,9 +19,13 @@ ap.add_argument(
 )
 args = ap.parse_args()
 
-import builtins, os, sys, traceback
+if __import__('platform').system() == 'Linux':
+    from plugin_util.terminal import _send_pid_to_server
+    _send_pid_to_server()
 
-from typing import Final, Tuple, Mapping
+import builtins, os, sys
+
+from typing import Final, Mapping
 from types import MappingProxyType
 
 _injectedConsole_CONFIG: Final[dict] = __import__('pickle').load(open(args.args, 'rb'))

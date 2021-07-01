@@ -2,10 +2,12 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 4)
+__version__ = (0, 0, 5)
 __all__ = ['run_in_process', 'restart_program', 'run_file', 'run_path', 
-           'ctx_run', 'run', 'ctx_load', 'load', 'prun', 'prun_module']
+           'ctx_run', 'run', 'ctx_load', 'load', 'prun', 'prun_module', 
+           'pid_exists', 'wait_for_pid']
 
+import errno
 import inspect
 import multiprocessing
 import re
@@ -14,9 +16,10 @@ import sys
 
 from contextlib import contextmanager
 from functools import partial
-from os import execl, getcwd, path as _path
+from os import execl, getcwd, kill, path as _path
 from runpy import run_path
 from sys import argv, executable
+from time import sleep
 from typing import (
     Any, Callable, Dict, Final, Generator, Optional, Tuple, Type, Union
 )
@@ -398,4 +401,36 @@ def prun_module(
     return prun([executable, '-m', mod, *args], 
                 continue_with_exceptions=continue_with_exceptions, 
                 shell=shell, **prun_kwds)
+
+
+def pid_exists(pid: int) -> bool:
+    'Check whether pid exists in the current process table (UNIX only).'
+    if pid < 0:
+        return False
+    if pid == 0:
+        # According to "man 2 kill" PID 0 refers to every process
+        # in the process group of the calling process.
+        # On certain systems 0 is a valid PID but we have no way
+        # to know that in a portable fashion.
+        raise ValueError('invalid PID 0')
+    try:
+        kill(pid, 0)
+    except OSError as err:
+        if err.errno == errno.ESRCH:
+            # ESRCH == No such process
+            return False
+        elif err.errno == errno.EPERM:
+            # EPERM clearly means there's a process to deny access to
+            return True
+        else:
+            # According to "man 2 kill" possible error values are
+            # (EINVAL, EPERM, ESRCH)
+            raise
+    else:
+        return True
+
+
+def wait_for_pid(pid: int, flush_time: float=0.1) -> None:
+    while pid_exists(pid):
+        sleep(flush_time)
 
