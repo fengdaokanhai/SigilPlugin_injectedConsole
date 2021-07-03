@@ -3,33 +3,49 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 1)
-__all__ = ['exists_execfile', 'get_debian_default_app', 'set_debian_default_app']
+__all__ = ['exists_execfile', 'list_debian_apps', 'get_debian_default_app', 
+           'set_debian_default_app']
 
 
-from subprocess import run as sprun, CompletedProcess, DEVNULL, PIPE
-from typing import Optional, Union
+from subprocess import run as sprun, DEVNULL, PIPE
+from typing import List, Optional
 
 
 def exists_execfile(file: str) -> bool:
     'Check whether the executable file exists in a directory in $PATH.'
-    return sprun(['which', file], stdout=DEVNULL, stderr=DEVNULL).returncode == 0
+    return sprun(
+        ['which', file], stdout=DEVNULL, stderr=DEVNULL
+    ).returncode == 0
 
 
-def get_debian_default_app(field: Union[bytes, str]) -> Optional[str]:
-    'Use the update-alternatives command to get the default app'
-    if isinstance(field, str):
-        field = field.encode('utf-8')
-    rt = sprun(
+def list_debian_apps(field: str) -> Optional[List[str]]:
+    'Use `update-alternatives` command to list apps of the field.'
+    ret = sprun(
+        ['update-alternatives', '--list', field], stdout=PIPE)
+    if ret.returncode != 0:
+        return None
+    return ret.stdout.rstrip(b'\n').decode().split('\n')
+
+
+def get_debian_default_app(field: str) -> Optional[str]:
+    'Use `update-alternatives` command to get default app of the field.'
+    f: bytes = field.encode()
+    ret = sprun(
         'update-alternatives --get-selections', 
-        check=True, shell=True, stdout=PIPE)
-    return next((
-        row.rsplit(maxsplit=1)[-1].decode('utf-8') 
-        for row in rt.stdout.split(b'\n') 
-        if row.startswith(b'%s '%field)
-    ), None)
+        shell=True, stdout=PIPE)
+    if ret.returncode != 0:
+        return None
+    rows = (row.split(maxsplit=3) 
+        for row in ret.stdout.rstrip(b'\n').split(b'\n'))
+    return next(
+        (r[2].decode() for r in rows if r[0] == f), None)
 
 
-def set_debian_default_app(field: str) -> CompletedProcess:
-    'Use the update-alternatives command to set the default app'
-    return sprun(['update-alternatives', '--config', field])
+def set_debian_default_app(field: str, value: Optional[str] = None) -> None:
+    'Use `update-alternatives` command to set default app of the field.'
+    if value is None:
+        cmd = ['sudo', 'update-alternatives', '--config', field]
+    else:
+        cmd = ['sudo', 'update-alternatives', '--set', field, value]
+    sprun(cmd, check=True)
 

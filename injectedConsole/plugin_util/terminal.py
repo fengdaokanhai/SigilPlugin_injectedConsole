@@ -18,11 +18,11 @@ import socket
 
 from contextlib import contextmanager
 from enum import Enum
-from os import environ, getcwd, getpid, remove, path as _path
+from os import getcwd, getpid, remove, path as _path
 from shlex import quote as shlex_quote
 from subprocess import run as sprun, CompletedProcess
 from tempfile import NamedTemporaryFile
-from time import perf_counter
+from threading import Thread
 from typing import (
     cast, Dict, Final, List, Optional, Sequence, Tuple, Union
 )
@@ -136,6 +136,29 @@ def start_windows_terminal(
 
 @contextmanager
 def _wait_for_client(timeout=10):
+    def wait():
+        pid: int = 0
+        try:
+            try:
+                server.listen(1)
+                client, _ = server.accept()
+                try:
+                    pid = int(client.recv(1024) or 0)
+                finally:
+                    client.close()
+            except socket.timeout:
+                pass
+            finally:
+                server.close()
+        finally:
+            try:
+                remove(_ENV_WAIT_PID_FILE)
+            except FileNotFoundError:
+                pass
+
+        if pid:
+            wait_for_pid(pid)
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     for port in range(10000, 65536):
         try:
@@ -150,38 +173,20 @@ def _wait_for_client(timeout=10):
 
     json.dump({'port': port}, open(_ENV_WAIT_PID_FILE, 'w'))
 
-    pid: int = 0
-    try:
-        start_t = perf_counter()
-        yield port
-        try:
-            server.listen(1)
-            remain_t = timeout - (perf_counter() - start_t)
-            if remain_t > 0:
-                client, addr = server.accept()
-                try:
-                    pid = int(client.recv(1024) or 0)
-                finally:
-                    client.close()
-        except socket.timeout:
-            pass
-        finally:
-            server.close()
-    finally:
-        try:
-            remove(_ENV_WAIT_PID_FILE)
-        except FileNotFoundError:
-            pass
+    t = Thread(target=wait, daemon=True)
+    t.start()
 
-    if pid:
-        wait_for_pid(pid)
+    yield port
+
+    t.join()
 
 
 def _send_pid_to_server():
-    if not _path.exists(_ENV_WAIT_PID_FILE):
+    try:
+        env = json.load(open(_ENV_WAIT_PID_FILE))
+    except FileNotFoundError:
         return
 
-    env = json.load(open(_ENV_WAIT_PID_FILE))
     port = env['port']
 
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -206,7 +211,6 @@ def start_linux_terminal(
 ) -> CompletedProcess:
     'Start a terminal emulator in Linux.'
     terminal_apps: Tuple[str, ...] = (
-        'x-terminal-emulator', # Debian Series
         'gnome-terminal',      # GNOME
         'konsole',             # KDE
         'xfce4-terminal',      # XFCE
@@ -216,10 +220,8 @@ def start_linux_terminal(
     )
 
     terminal_app_execute_args: Dict[str, List[str]] = {
-        # https://helpmanual.io/man1/x-terminal-emulator/
-        'x-terminal-emulator': ['-x'], 
         # https://linuxcommandlibrary.com/man/gnome-terminal
-        'gnome-terminal': ['-x'], 
+        'gnome-terminal': ['--'], 
         # https://linuxcommandlibrary.com/man/konsole
         'konsole': ['-e'], 
         # https://linuxcommandlibrary.com/man/xfce4-terminal
@@ -235,12 +237,19 @@ def start_linux_terminal(
     }
 
     if app is None:
-        for app in terminal_apps:
-            if exists_execfile(app):
-                break
+        # Debian Series
+        # https://helpmanual.io/man1/x-terminal-emulator/
+        if exists_execfile('x-terminal-emulator'):
+            from .shell_util import get_debian_default_app
+            app = get_debian_default_app('x-terminal-emulator')
         else:
-            raise NotImplementedError('Failed to detect the terminal app, '
-                                      'please specify one')
+            for app in terminal_apps:
+                if exists_execfile(app):
+                    break
+            else:
+                raise NotImplementedError('Failed to detect the terminal app, '
+                                          'please specify one')
+        app = cast(str, app)
     split_command: List[str] = [app]
     if app_args is None:
         app_name = app.rsplit('/', 1)[-1]
