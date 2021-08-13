@@ -30,6 +30,19 @@ TODO: to be continued...
 
 ### Recommended modules
 
+### Package Manager
+- [pip](https://pypi.org/project/pip/)
+- [poetry](https://pypi.org/project/poetry/)
+- [conda](https://pypi.org/project/conda/)
+
+#### Text
+- [flashtext](https://pypi.org/project/flashtext/)
+- [fuzzywuzzy](https://pypi.org/project/fuzzywuzzy/)
+
+#### Styled Text
+- [rich](https://pypi.org/project/rich/)
+- [Pygments](https://pygments.org/)
+
 #### Parser or Selector 
 - [lxml](https://pypi.org/project/lxml/)
 - [pyquery](https://pypi.org/project/pyquery/)
@@ -39,9 +52,6 @@ TODO: to be continued...
 - [cssselect](https://pypi.org/project/cssselect/)
 - [html5lib](https://pypi.org/project/html5lib/)
 - [htmldom](https://pypi.org/project/htmldom/)
-
-#### Text
-- [flashtext](https://pypi.org/project/flashtext/)
 
 #### CSS
 - [cssutils](https://pypi.org/project/cssutils/)
@@ -62,16 +72,19 @@ TODO: to be continued...
 - [PyAutoGUI](https://pypi.org/project/PyAutoGUI/)
 - [layoutx](https://pypi.org/project/layoutx/)
 - [tkdnd](https://github.com/petasis/tkdnd)
+- [TkinterDnD2](https://github.com/pmgagne/tkinterdnd2)
+- [tkinterdnd2](https://pypi.org/project/tkinterdnd2/)
 
 #### Debug
 - [pytest](https://pypi.org/project/pytest/)
 - [nose2](https://pypi.org/project/nose2/)
 - [birdseye](https://pypi.org/project/birdseye/)
 
-#### Static Type Check
+#### Type Check
 - [typeshed](https://github.com/python/typeshed)
 - [typeshed-client](https://pypi.org/project/typeshed-client/)
 - [mypy](https://pypi.org/project/mypy/)
 - [pytype](https://pypi.org/project/pytype/)
 - [pyre-check](https://pypi.org/project/pyre-check/)
-
+- [pydantic](https://pypi.org/project/pydantic/)
+- [typeguard](https://pypi.org/project/typeguard/)

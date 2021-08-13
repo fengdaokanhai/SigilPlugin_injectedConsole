@@ -11,10 +11,11 @@
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 3)
 
-import json
-import platform
+import os
+import pickle
 import re
 import socket
+import uuid
 
 from contextlib import contextmanager
 from enum import Enum
@@ -22,7 +23,6 @@ from os import getcwd, getpid, remove, path as _path
 from shlex import quote as shlex_quote
 from subprocess import run as sprun, CompletedProcess
 from tempfile import NamedTemporaryFile
-from threading import Thread
 from typing import (
     cast, Dict, Final, List, Optional, Sequence, Tuple, Union
 )
@@ -30,6 +30,8 @@ from typing import (
 from .cm import ensure_cm
 from .shell_util import exists_execfile
 from .run import wait_for_pid
+from .decorator import as_thread, suppressed, expand_by_args
+from .timeout import ThreadingTimeout
 
 try:
     from shlex import join as shlex_join # type: ignore
@@ -45,7 +47,16 @@ __all__ = ['start_terminal', 'shlex_quote', 'shlex_join', 'winsh_quote', 'winsh_
 
 
 _CURDIR: Final[str] = getcwd()
-_ENV_WAIT_PID_FILE = _path.join(_CURDIR, 'env_wait_pid.json')
+_ENV_WAIT_PID_FILE = _path.join(_CURDIR, 'env_wait_pid.pkl')
+_PLATFORM = __import__('platform').system()
+
+
+def _remove_file(path):
+    try:
+        remove(path)
+        return True
+    except OSError:
+        return False
 
 
 def winsh_quote(part, _cre=re.compile(r'\s')):
@@ -63,16 +74,15 @@ def winsh_join(split_command: Sequence[str]) -> str:
 
 def start_terminal(cmd, **kwargs) -> CompletedProcess:
     'Start a terminal emulator in current OS platform.'
-    sys = platform.system()
-    if sys == 'Windows':
+    if _PLATFORM == 'Windows':
         return start_windows_terminal(cmd, **kwargs)
-    elif sys == 'Darwin':
+    elif _PLATFORM == 'Darwin':
         return start_macosx_terminal(cmd, **kwargs)
-    elif sys == 'Linux':
+    elif _PLATFORM == 'Linux':
         return start_linux_terminal(cmd, **kwargs)
     else:
         raise NotImplementedError(
-            'start terminal of other system %r is unavailable' % sys)
+            'start terminal of other system %r is unavailable' % _PLATFORM)
 
 
 def start_windows_terminal(
@@ -114,10 +124,7 @@ def start_windows_terminal(
         finally:
             # TODO: We may need to wait until the file is no longer 
             #       occupied before deleting it.
-            try:
-                remove(f.name)
-            except FileNotFoundError:
-                pass
+            _remove_file(f.name)
     if isinstance(cmd, str):
         if app in ('powershell', 'powershell.exe') and cmd.strip():
             split_command.append('&')
@@ -134,70 +141,158 @@ def start_windows_terminal(
         return sprun(split_command, check=True, shell=True)
 
 
+@expand_by_args
+def _wait_child_process(*args, **kwds):
+    raise NotImplementedError
+
+
+def _make_tcpsock(port: Optional[int] = None, port_start: int = 10000):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    if port is None:
+        for port in range(port_start, 65536):
+            try:
+                server.bind(('0.0.0.0', port))
+                break
+            except OSError:
+                pass
+        else:
+            raise OSError('cannot bind port %d-65535' % port_start)
+    else:
+        server.bind(('0.0.0.0', port))
+
+    return server
+
+
+@_wait_child_process.register('tcpsock')
 @contextmanager
-def _wait_for_client(timeout=10):
+def _waitcp_tcpsock(timeout: Union[int, float] = 10):
+    server = _make_tcpsock()
+    server.settimeout(timeout)
+    address = server.getsockname()
+
+    @as_thread
     def wait():
         pid: int = 0
-        try:
-            try:
-                server.listen(1)
-                client, _ = server.accept()
-                try:
-                    pid = int(client.recv(1024) or 0)
-                finally:
-                    client.close()
-            except socket.timeout:
-                pass
-            finally:
-                server.close()
-        finally:
-            try:
-                remove(_ENV_WAIT_PID_FILE)
-            except FileNotFoundError:
-                pass
+        with server:
+            server.listen(1)
+            client, _ = server.accept()
+            with client:
+                pid = int(server.read())
+        if pid:
+            wait_for_pid(pid)
+
+    future = wait()
+    yield address
+    future.thread.join()
+
+
+def _make_unixsock(name=None):
+    if name is None:
+        name = '%s.sock' % uuid.uuid4()
+    else:
+        _remove_file(name)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(name)
+
+    return server
+
+
+@_wait_child_process.register('unixsock')
+@contextmanager
+def _waitcp_unixsock(timeout: Union[int, float] = 10):
+    server = _make_unixsock()
+    server.settimeout(timeout)
+    address = server.getsockname()
+
+    @as_thread
+    def wait():
+        pid: int = 0
+        with server:
+            server.listen(1)
+            client, _ = server.accept()
+            with client:
+                pid = int(server.read())
+        if pid:
+            wait_for_pid(pid)
+
+    future = wait()
+    try:
+        yield address
+        future.thread.join()
+    finally:
+        _remove_file(address)
+
+
+def _make_namedpipe(name=None):
+    if name is None:
+        name = '%s.pipe' % uuid.uuid4()
+    else:
+        _remove_file(name)
+    os.mkfifo(name)
+    return name
+
+
+@_wait_child_process.register('namedpipe')
+@contextmanager
+def _waitcp_namedpipe(timeout: Union[int, float] = 10):
+    name = _make_namedpipe()
+
+    @as_thread
+    def wait():
+        pid: int = 0
+        with ThreadingTimeout(timeout):
+            with open(name, 'rb') as f:
+                pid = int(f.read())
 
         if pid:
             wait_for_pid(pid)
 
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    for port in range(10000, 65536):
-        try:
-            server.bind(('localhost', port))
-            break
-        except OSError:
-            pass
-    else:
-        raise OSError('cannot bind port 10000-65535')
-
-    server.settimeout(timeout)
-
-    json.dump({'port': port}, open(_ENV_WAIT_PID_FILE, 'w'))
-
-    t = Thread(target=wait, daemon=True)
-    t.start()
-
-    yield port
-
-    t.join()
-
-
-def _send_pid_to_server():
     try:
-        env = json.load(open(_ENV_WAIT_PID_FILE))
-    except FileNotFoundError:
-        return
-
-    port = env['port']
-
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        client.connect(('localhost', port))
-    except:
-        return
-    try:
-        client.send(str(getpid()).encode('ascii'))
+        future = wait()
+        future.thread.join()
     finally:
-        client.close()
+        _remove_file(name)
+
+
+@contextmanager
+def _wait_for_client(
+    server_type: str = 'tcpsock', 
+    timeout: Union[int, float] = 10, 
+):
+    try:
+        with _wait_child_process(server_type, timeout=timeout) as address:
+            pickle.dump(
+                {'type': server_type, 'address': address}, 
+                open(_ENV_WAIT_PID_FILE, 'wb')
+            )
+            yield
+    finally:
+        _remove_file(_ENV_WAIT_PID_FILE)
+
+
+@suppressed
+def _send_pid_to_server(env=None):
+    if env is None:
+        env = pickle.load(open(_ENV_WAIT_PID_FILE, 'rb'))
+
+    server_type, address = env['type'], env['address']
+    if server_type == 'tcpsock':
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(address)
+        with client:
+            client.send(str(getpid()).encode('latin-1'))
+    elif server_type == 'unixsock':
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(address)
+        with client:
+            client.send(str(getpid()).encode('latin-1'))
+    elif server_type == 'namedpipe':
+        client = open(address, 'wb')
+        with client:
+            client.write(str(getpid()).encode('latin-1'))
+    else:
+        raise NotImplementedError(server_type)
 
 
 def start_linux_terminal(
