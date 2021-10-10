@@ -1,5 +1,10 @@
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 3)
+__all__ = [
+    'decorated', 'partial_decorated', 'pipe', 'compose', 'optional_kwargs', 
+    'optional', 'optional_decorate', 'optional_partial', 'currying', 
+    'partialize', 
+]
 
 from functools import partial, reduce, update_wrapper
 from inspect import signature
@@ -7,13 +12,6 @@ from typing import Any, Callable, Optional, TypeVar, Union
 
 from ..partial import ppartial
 from ..undefined import undefined
-
-
-__all__ = [
-    'decorated', 'partial_decorated', 'pipe', 'compose', 'optional_kwargs', 
-    'optional', 'optional_decorate', 'optional_partial', 'currying', 
-    'partialize', 
-]
 
 
 T = TypeVar('T')

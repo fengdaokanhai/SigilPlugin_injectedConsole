@@ -17,9 +17,10 @@ TODO: to be continued...
 - [EPUB 2.0.1](http://idpf.org/epub/201)
 - [EPUB 3.0](http://idpf.org/epub/30/)
 - [EPUB 3 COMMUNITY GROUP](https://www.w3.org/community/epub3/)
+- [Sigil docs | GitHub](https://github.com/Sigil-Ebook/Sigil/tree/master/docs)
 - [Sigil repo](https://fossies.org/linux/Sigil/)
 - [Sigil github repository docs directory](https://github.com/Sigil-Ebook/Sigil/tree/master/docs)
-- [Sigil_Plugin_Framework_rev12.epub](https://fossies.org/linux/Sigil/docs/Sigil_Plugin_Framework_rev12.epub)
+- [Sigil_Plugin_Framework_rev13.epub](https://fossies.org/linux/Sigil/docs/Sigil_Plugin_Framework_rev13.epub)
 
 ## Resources
 
@@ -34,10 +35,12 @@ TODO: to be continued...
 - [pip](https://pypi.org/project/pip/)
 - [poetry](https://pypi.org/project/poetry/)
 - [conda](https://pypi.org/project/conda/)
+- [pipx](https://pypi.org/project/pipx/)
 
 #### Text
 - [flashtext](https://pypi.org/project/flashtext/)
 - [fuzzywuzzy](https://pypi.org/project/fuzzywuzzy/)
+- [yarl](https://pypi.org/project/yarl/)
 
 #### Styled Text
 - [rich](https://pypi.org/project/rich/)
@@ -63,6 +66,7 @@ TODO: to be continued...
 
 #### Translation
 - [OpenCC](https://pypi.org/project/OpenCC/)
+- [pypinyin](https://pypi.org/project/pypinyin/)
 
 #### GUI
 - [PyQt5](https://pypi.org/project/PyQt5/)
@@ -74,6 +78,8 @@ TODO: to be continued...
 - [tkdnd](https://github.com/petasis/tkdnd)
 - [TkinterDnD2](https://github.com/pmgagne/tkinterdnd2)
 - [tkinterdnd2](https://pypi.org/project/tkinterdnd2/)
+- [Urwid](http://urwid.org/)
+- [blessed](https://pypi.org/project/blessed/)
 
 #### Debug
 - [pytest](https://pypi.org/project/pytest/)

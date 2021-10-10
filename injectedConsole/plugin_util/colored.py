@@ -20,6 +20,7 @@ __version__ = (0, 0, 2)
 
 from abc import ABC, abstractproperty
 from collections import namedtuple
+from enum import Enum
 from typing import Optional, Sequence, Tuple, Union
 
 
@@ -90,11 +91,10 @@ class RGBColor(BaseColor, namedtuple('RGB', 'red, green, blue')): # 24 bit color
 class HexColor(BaseColor, namedtuple('Hex', 'hexcolor')): # 24 bit color = 16777216 colors
     'See: https://en.wikipedia.org/wiki/ANSI_escape_code#24-bit'
 
-    # TODO: support #[0-9A-Fa-f]{3}'
     def __new__(
         cls, 
         hexcolor: str, 
-        _match=__import__('re').compile('#[0-9A-Fa-f]{6}').fullmatch
+        _match=__import__('re').compile('#[0-9A-Fa-f]{3}|#[0-9A-Fa-f]{6}').fullmatch
     ):
         assert _match(hexcolor) is not None, f'invalid `hexcolor`: {hexcolor!r}'
         return super().__new__(cls, hexcolor)
@@ -102,16 +102,19 @@ class HexColor(BaseColor, namedtuple('Hex', 'hexcolor')): # 24 bit color = 16777
     @property
     def rgb_color(self):
         hexcolor = self.hexcolor
-        rgb = (int(hexcolor[i:i+2], 16) for i in range(1, 7, 2))
+        if len(hexcolor) == 4:
+            rgb = (int(h*2, 16) for h in hexcolor[1:])
+        else:
+            rgb = (int(hexcolor[i:i+2], 16) for i in range(1, 7, 2))
         return RGBColor(*rgb)
 
     @property
     def fgcolor(self):
-        return '38;2;%d;%d;%d' % self.rgb_color
+        return self.rgb_color.fgcolor
 
     @property
     def bgcolor(self):
-        return '48;2;%d;%d;%d' % self.rgb_color
+        return self.rgb_color.bgcolor
 
 
 # See: https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_.28Select_Graphic_Rendition.29_parameters
@@ -135,15 +138,15 @@ SET = {
     'reverse': 7,
     'hidden': 8,
     'cross_out': 9,
-    'resetbold': 21,
-    'resetdim': 22,
-    'resetitalic': 23,
-    'resetunderline': 24,
-    'resetblink': 25,
-    'resetrapid_blink': 26,
-    'resetreverse': 27,
-    'resethidden': 28,
-    'resetcross_out': 29,
+    'reset_bold': 21,
+    'reset_dim': 22,
+    'reset_italic': 23,
+    'reset_underline': 24,
+    'reset_blink': 25,
+    'reset_rapid_blink': 26,
+    'reset_reverse': 27,
+    'reset_hidden': 28,
+    'reset_cross_out': 29,
     '-bold': 21,
     '-dim': 22,
     '-italic': 23,
@@ -173,15 +176,15 @@ STD_COLORS = {
     'blue': 34,
     'magenta': 35,
     'cyan': 36,
-    'white': 37,
-    'brightblack': 90,
-    'brightred': 91,
-    'brightgreen': 92,
-    'brightyello': 93,
-    'brightblue': 94,
-    'brightmagenta': 95,
-    'brightcyan': 96,
-    'brightwhite': 97,
+    'lightgray': 37,
+    'darkgray': 90,
+    'lightred': 91,
+    'lightgreen': 92,
+    'lightyellow': 93,
+    'lightblue': 94,
+    'lightmagenta': 95,
+    'lightcyan': 96,
+    'white': 97,
     '+black': 90,
     '+red': 91,
     '+green': 92,
@@ -478,28 +481,38 @@ MAP_NAME_RGBCOLOR = {
 }
 
 
+GroundColorEnum = Enum('GroundColorEnum', 'fg, bg', start=0)
+
+def ensure_enum(obj, cls):
+    if isinstance(obj, cls):
+        return obj
+    elif isinstance(obj, int):
+        return cls(obj)
+    elif isinstance(obj, str):
+        return cls[obj]
+    raise TypeError
+
+
 def _make_color(
     color: Union[str, int, Tuple[int, ...], BaseColor], 
-    kind='fg'
+    kind: Union[int, str, GroundColorEnum] = GroundColorEnum.fg, 
 ) -> Union[BaseColor, int]:
-    try:
-        kind = ('fg', 'bg').index(kind)
-    except ValueError:
-        raise ValueError(f'invalid kind {kind!r}, expected fg or bg')
-    if isinstance(color, int):
-        color = Color(color)
-    elif isinstance(color, tuple):
-        color = RGBColor(*color[:3])
-    elif isinstance(color, str):
-        if color.startswith('#'):
-            color = HexColor(color)
-        elif color in STD_COLORS:
-            return STD_COLORS[color] + kind * 10
-        elif color in MAP_NAME_RGBCOLOR:
-            color = MAP_NAME_RGBCOLOR[color]
-        else:
-            raise ValueError(f'invalid color {color!r}')
-    return color.bgcolor if kind else color.fgcolor
+    kind = ensure_enum(kind, GroundColorEnum)
+    if not isinstance(color, BaseColor):
+        if isinstance(color, int):
+            color = Color(color)
+        elif isinstance(color, tuple):
+            color = RGBColor(*color[:3])
+        elif isinstance(color, str):
+            if color.startswith('#'):
+                color = HexColor(color)
+            elif color in STD_COLORS:
+                return STD_COLORS[color] + kind.value * 10
+            elif color in MAP_NAME_RGBCOLOR:
+                color = MAP_NAME_RGBCOLOR[color]
+            else:
+                raise ValueError(f'invalid color {color!r}')
+    return color.bgcolor if kind.value else color.fgcolor
 
 
 def colored(

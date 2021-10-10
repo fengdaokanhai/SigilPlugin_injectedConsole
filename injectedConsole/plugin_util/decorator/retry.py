@@ -1,5 +1,6 @@
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 1)
+__all__ = ['AggregationException', 'retry_sync', 'retry_async', 'retry']
 
 from inspect import iscoroutinefunction
 from itertools import chain
@@ -7,10 +8,7 @@ from typing import (
     cast, Callable, List, Optional, Tuple, Type, Union
 )
 
-from .decorator import decorated, optional_decorate
-
-
-__all__ = ['AggregationException', 'retry_sync', 'retry_async', 'retry']
+from .decorator import optional_decorate
 
 
 class AggregationException(Exception):

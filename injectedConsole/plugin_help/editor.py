@@ -7,13 +7,13 @@ This module provides some functions for modifying files in the
 '''
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1, 3)
-
+__version__ = (0, 1, 4)
 __all__ = [
     'html_fromstring', 'html_tostring', 'xml_fromstring', 'xml_tostring', 
     'IterMatchInfo', 're_iter', 're_sub', 'WriteBack', 'DoNotWriteBack', 'edit', 
-    'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'edit_iter', 'edit_batch', 
-    'edit_html_iter', 'edit_html_batch', 'EditCache', 'TextEditCache', 
+    'ctx_edit', 'ctx_edit_sgml', 'ctx_edit_html', 'read_iter', 'read_html_iter', 
+    'edit_iter', 'edit_batch', 'edit_html_iter', 'edit_html_batch', 
+    'EditCache', 'TextEditCache', 
 ]
 
 import sys
@@ -541,6 +541,58 @@ def ctx_edit_html(
             method='xhtml' if 'xhtml' in bc.id_to_mime(manifest_id) else 'html',
         ),
     ))
+
+
+def read_iter(
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
+    bc: Optional[BookContainer] = None, 
+) -> Generator[Tuple[str, str, Union[bytes, str]], None, None]:
+    '''Iterate over the data of each `manifest_id_s`.
+
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
+        The XPath as following (the `namespace` depends on the specific situation):
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get by `bc.manifest_iter()`.
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    '''
+    if manifest_id_s is None:
+        it = (info[:2] for info in bc.manifest_iter())
+    elif isinstance(manifest_id_s, str):
+        it = (manifest_id_s, bc.id_to_href(manifest_id_s)), 
+    else:
+        it = ((id, bc.id_to_href(id)) for id in manifest_id_s)
+
+    for fid, href in it:
+        yield fid, href, bc.readfile(fid)
+
+
+def read_html_iter(
+    manifest_id_s: Union[None, str, Iterable[str]] = None, 
+    bc: Optional[BookContainer] = None, 
+) -> Generator[Tuple[str, str, Element], None, None]:
+    '''Iterate over the data as (X)HTML etree object of each `manifest_id_s`.
+
+    :param manifest_id_s: Manifest id collection, are listed in OPF file,
+        The XPath as following (the `namespace` depends on the specific situation):
+            /namespace:package/namespace:manifest/namespace:item/@id
+        If `manifest_id_s` is None (the default), it will get by `bc.manifest_iter()`.
+    :param bc: `BookContainer` object. 
+        If it is None (the default), will be found in caller's globals().
+        `BookContainer` object is an object of ePub book content provided by Sigil, 
+        which can be used to access and operate the files in ePub.
+    '''
+    if manifest_id_s is None:
+        it = (info[:2] for info in bc.text_iter())
+    elif isinstance(manifest_id_s, str):
+        it = (manifest_id_s, bc.id_to_href(manifest_id_s)), 
+    else:
+        it = ((id, bc.id_to_href(id)) for id in manifest_id_s)
+
+    for fid in it:
+        yield fid, html_fromstring(bc.readfile(fid).encode('utf-8'))
 
 
 def edit_iter(

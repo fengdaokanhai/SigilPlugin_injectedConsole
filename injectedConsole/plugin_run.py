@@ -3,6 +3,9 @@
 
 __all__ = ['run']
 
+# TODO: Allow users to create `venv`
+# TODO: Allow users to choose a terminal app
+
 import builtins
 import json
 import pickle
@@ -18,6 +21,7 @@ from types import MappingProxyType
 from plugin_util.run import run_in_process
 
 
+_IS_MACOS = __import__('platform').system() == 'Darwin'
 MUDULE_DIR: Final[str] = path.dirname(path.abspath(__file__))
 CONFIG_JSON_FILE: Final[str] = path.join(MUDULE_DIR, 'config.json')
 SHELLS: Final[Tuple[str, ...]] = (
@@ -62,10 +66,10 @@ def get_config_tui() -> dict:
     raise NotImplementedError
 
 
-def get_config_gui(
+def get_config_gui_tk(
     # Tips: After closing the `tkinter` GUI in Mac OSX, it will get stuck, 
     # so I specify to run the `tkinter` GUI in a new process.
-    new_process: bool = __import__('platform').system() == 'Darwin', 
+    new_process: bool = _IS_MACOS, 
 ) -> dict:
     try:
         from plugin_util.xml_tkinter import TkinterXMLConfigParser
@@ -74,7 +78,7 @@ def get_config_gui(
         print('WARNING:', 'Probably cannot import `tkinter` module, skipping configuration...')
         return {}
     if new_process:
-        return run_in_process(get_config_gui, False)
+        return run_in_process(get_config_gui_tk, False)
     else:
         with _ctx_conifg() as config:
             if 'config' not in config:
@@ -89,6 +93,15 @@ def get_config_gui(
             tkapp.start()
 
             return config
+
+
+def get_config_gui_qt(new_process: bool = _IS_MACOS) -> dict:
+    raise NotImplementedError
+
+
+# TODO: If there no tkinter, then using PyQt5
+def get_config_gui(new_process: bool = _IS_MACOS):
+    return get_config_gui_tk(new_process)
 
 
 def run(bc) -> Optional[int]:

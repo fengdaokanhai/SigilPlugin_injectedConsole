@@ -9,7 +9,7 @@
 
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 3)
+__version__ = (0, 0, 4)
 
 import os
 import pickle
@@ -154,7 +154,7 @@ def _make_tcpsock(port: Optional[int] = None, port_start: int = 10000):
             try:
                 server.bind(('0.0.0.0', port))
                 break
-            except OSError:
+            except socket.error:
                 pass
         else:
             raise OSError('cannot bind port %d-65535' % port_start)
@@ -255,6 +255,8 @@ def _waitcp_namedpipe(timeout: Union[int, float] = 10):
         _remove_file(name)
 
 
+# TODO: Refer to `multiprocessing.connection` for improvement
+#       https://github.com/python/cpython/blob/main/Lib/multiprocessing/connection.py
 @contextmanager
 def _wait_for_client(
     server_type: str = 'tcpsock', 

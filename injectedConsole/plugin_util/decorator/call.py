@@ -1,14 +1,12 @@
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 2)
+__version__ = (0, 0, 3)
+__all__ = ['call_before', 'call_after', 'call_error', 'call_finally', 
+           'dispatch_by_args', 'expand_by_args']
 
 from inspect import isawaitable, iscoroutinefunction
 from typing import cast, Callable, Optional, Union, Tuple, Type
 
 from .decorator import optional_decorate
-
-
-__all__ = ['call_before', 'call_after', 'call_error', 'call_finally', 
-           'dispatch_by_args', 'expand_by_args']
 
 
 @optional_decorate
@@ -60,7 +58,10 @@ def call_error(
     f: Optional[Callable] = None, 
     /, 
     call: Callable = lambda *args: None, 
-    exceptions: Union[Type[BaseException], Tuple[Type[BaseException], ...]] = BaseException, 
+    exceptions: Union[
+        Type[BaseException], 
+        Tuple[Type[BaseException], ...]
+    ] = BaseException, 
     async_: Optional[bool] = None, 
     suppress: bool = False, 
 ) -> Callable:
@@ -141,9 +142,14 @@ def _dict_include(self, other):
 
 class dispatch_by_args:
 
-    def __init__(self, func):
-        self.default = func
+    def __init__(self, func=None, /):
+        if func is not None:
+            self.default = func
         self.alternates = []
+
+    @staticmethod
+    def default(*args, **kwds):
+        raise NotImplementedError
 
     def register(self, fn=None, /, *args, **kwds):
         if fn is None:

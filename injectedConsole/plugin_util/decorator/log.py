@@ -1,5 +1,6 @@
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 1)
+__all__ = ['logthis', 'logreturn', 'logerror']
 
 import logging
 
@@ -7,9 +8,6 @@ from inspect import iscoroutinefunction
 from typing import cast, Callable, Optional, Union
 
 from .decorator import optional_decorate
-
-
-__all__ = ['logthis', 'logreturn', 'logerror']
 
 
 logging.basicConfig(

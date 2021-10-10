@@ -7,22 +7,22 @@
 # https://pip.pypa.io/en/stable/
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 4)
+__version__ = (0, 0, 5)
+__all__ = [
+    'check_pip', 'install_pip_by_ensurepip', 'install_pip_by_getpip', 
+    'install_pip', 'execute_pip', 'execute_pip_in_child_process', 'install', 
+    'uninstall', 'check_install', 'check_uninstall', 'ensure_import', 
+]
 
 import platform
 import subprocess
 
 from sys import executable
 from tempfile import NamedTemporaryFile
-from typing import Final, Iterable, List, Optional, Union
+from typing import Final, Iterable, List, Optional, Sequence, Union
 from types import ModuleType
 from urllib.parse import urlsplit
 from urllib.request import urlopen
-
-
-__all__ = ['check_pip', 'install_pip_by_ensurepip', 'install_pip_by_getpip', 
-           'install_pip', 'execute_pip', 'install', 'uninstall', 'check_install', 
-           'check_uninstall', 'ensure_import', ]
 
 
 # When using subprocess.run on Windows, you should specify shell=True
@@ -35,6 +35,23 @@ INDEX_URL: str = 'https://mirrors.aliyun.com/pypi/simple/'
 # TRUSTED_HOST: Mark this host or host:port pair as trusted,
 #     even though it does not have valid or any HTTPS.
 TRUSTED_HOST: str = 'mirrors.aliyun.com'
+
+if _PLATFORM_IS_WINDOWS:
+    import site as _site
+    from os import path as _path
+
+    if not hasattr(_site, 'PREFIXES'):
+        _site.PREFIXES = [__import__('sys').prefix, __import__('sys').exec_prefix]
+
+    _site.ENABLE_USER_SITE = True
+
+    _libpath = _path.dirname(_site.__file__)
+    if not hasattr(_site, 'USER_BASE'):
+        _site.USER_BASE = _path.dirname(_libpath)
+    if not hasattr(_site, 'USER_SITE'):
+        _site.USER_SITE = _path.join(_libpath, 'site-packages')
+
+    del _site, _path, _libpath
 
 
 def check_pip(ensure: bool = True) -> bool:
@@ -79,18 +96,15 @@ you should already have `pip`. If you installed using your OS package manager,
     return True
 
 
-def install_pip_by_ensurepip(
-    *args: str, 
-    check: bool = False,
-    executable: str = executable,
-) -> subprocess.CompletedProcess:
+def install_pip_by_ensurepip(*args: str) -> None:
     '''Install `pip` package using `ensurepip` package.
     Reference:
         - https://docs.python.org/3/library/ensurepip.html
         - https://packaging.python.org/tutorials/installing-packages/#ensure-you-can-run-pip-from-the-command-line
     '''
-    return subprocess.run([executable, '-m', 'ensurepip', *args], 
-                          check=check, shell=_PLATFORM_IS_WINDOWS)
+    from ensurepip import _main
+    if not _main(list(args)):
+        raise RuntimeError
 
 
 def install_pip_by_getpip(
@@ -104,6 +118,25 @@ def install_pip_by_getpip(
         - https://packaging.python.org/tutorials/installing-packages/#ensure-you-can-run-pip-from-the-command-line
     '''
     with NamedTemporaryFile(mode='wb', suffix='.py') as f:
+        f.write('''\
+#!/usr/bin/env python
+if platform.system() == 'Windows':
+    import site as _site
+    from os import path as _path
+
+    if not hasattr(_site, 'PREFIXES'):
+        _site.PREFIXES = [__import__('sys').prefix, __import__('sys').exec_prefix]
+
+    _site.ENABLE_USER_SITE = True
+
+    _libpath = _path.dirname(_site.__file__)
+    if not hasattr(_site, 'USER_BASE'):
+        _site.USER_BASE = _path.dirname(_libpath)
+    if not hasattr(_site, 'USER_SITE'):
+        _site.USER_SITE = _path.join(_libpath, 'site-packages')
+
+    del _site, _path, _libpath
+''')
         response = urlopen(
             'https://bootstrap.pypa.io/get-pip.py',
             context=__import__('ssl')._create_unverified_context()
@@ -118,7 +151,7 @@ def install_pip(executable: str = executable) -> None:
     'Install `pip` package.'
     try:
         # https://docs.python.org/3/installing/index.html#pip-not-installed
-        install_pip_by_ensurepip('--default-pip', check=True, executable=executable)
+        install_pip_by_ensurepip('--default-pip')
     except:
         args: List[str] = []
         index_url = globals().get('INDEX_URL')
@@ -132,10 +165,15 @@ def install_pip(executable: str = executable) -> None:
         install_pip_by_getpip(*args, check=True, executable=executable)
 
 
-def execute_pip(
-    args: Union[str, Iterable[str]],
-    check: bool = True,
-    executable: str = executable,
+def execute_pip(args: Sequence[str]) -> None:
+    'execute pip in same thread'
+    from pip._internal import main
+    return main(list(args))
+
+
+def execute_pip_in_child_process(
+    args: Union[str, Iterable[str]], 
+    executable: str = executable, 
 ) -> subprocess.CompletedProcess:
     'execute pip in child process'
     command: Union[str, list]
@@ -154,7 +192,8 @@ def install(
     upgrade: bool = False,
     index_url: Optional[str] = None,
     trusted_host: Optional[str] = None,
-    other_args: Iterable[str] = (),
+    other_args: Iterable[str] = (), 
+    new_process: bool = False, 
 ) -> None:
     'install package with pip'
     cmd = ['install']
@@ -172,17 +211,25 @@ def install(
     cmd.append(package)
     if other_packages:
         cmd.extend(other_packages)
-    execute_pip(cmd)
+    if new_process:
+        execute_pip_in_child_process(cmd)
+    else:
+        execute_pip(cmd)
 
 
 def uninstall(
     package: str, 
     /, 
     *other_packages: str,
-    other_args: Iterable[str] = ('--yes',),
+    other_args: Iterable[str] = ('--yes',), 
+    new_process: bool = False, 
 ) -> None:
     'uninstall package with pip'
-    execute_pip(['uninstall', *other_args, package, *other_packages])
+    cmd = ['uninstall', *other_args, package, *other_packages]
+    if new_process:
+        execute_pip_in_child_process(cmd)
+    else:
+        execute_pip(cmd)
 
 
 def check_install(

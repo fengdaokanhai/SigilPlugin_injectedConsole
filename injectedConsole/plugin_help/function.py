@@ -2,11 +2,11 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 7)
+__version__ = (0, 0, 8)
 __all__ = [
     'abort', 'exit', 'dump_wrapper', 'load_wrapper', 'get_container', 'reload_shell', 
     'back_shell', 'reload_embeded_shell', 'reload_to_shell', 'run_env', 'load_script', 
-    'run_plugin', 'start_nbterm', 'start_qtconsole', 'start_spyder', 
+    'run_plugin', 'start_with_app', 'start_nbterm', 'start_qtconsole', 'start_spyder', 
     'start_jupyter_notebook', 'start_jupyter_lab', 'start_python_shell', 
 ]
 
@@ -17,7 +17,7 @@ import sys
 
 from contextlib import contextmanager
 from copy import deepcopy
-from os import _exit, path as _path, environ
+from os import _exit, path as _path, environ, getcwd
 from pickle import load as pickle_load, dump as pickle_dump
 from runpy import run_path
 from tempfile import NamedTemporaryFile
@@ -158,18 +158,20 @@ def back_shell(argv: List[str] = sys.argv) -> None:
     try:
         idx: int = argv_.index('--prev-shell')
     except ValueError:
-        prev_shell = None
+        prev_shell = 'python'
     else:
         prev_shell = argv_[idx + 1]
         del argv_[idx: idx + 2]
-    if prev_shell:
-        try:
-            idx = argv_.index('--shell')
-        except ValueError:
-            argv_.extend(('--shell', prev_shell))
-        else:
-            argv_[idx: idx + 2] = ['--shell', prev_shell]
-        print(colored('[WARRNING]', 'yellow', attrs=['bold']), 'back to shell:', prev_shell)
+    try:
+        idx = argv_.index('--shell')
+    except ValueError:
+        argv_.extend(('--shell', prev_shell))
+    else:
+        argv_[idx: idx + 2] = ['--shell', prev_shell]
+    print(colored('[WARRNING]', 'yellow', attrs=['bold']), 'back to shell:', prev_shell)
+    if _SYSTEM_IS_WINDOWS:
+        reload_embeded_shell(prev_shell)
+    else:
         restart_program(argv_)
 
 
@@ -249,10 +251,17 @@ def load_script(
 
     sentinel = object()
     ret: dict = cast(dict, run_path(path, globals, '__main__'))
-    updating_dict: dict = {
-        k: v for k, v in ret.items() 
-        if check_group(k) and v is not globals.get(k, sentinel)
-    }
+    updating_dict: dict
+    if '__all__' in ret:
+        updating_dict = {
+            k: v for k in ret['__all__']
+            if k in ret and (v := ret[k]) and v is not globals.get(k, sentinel)
+        }
+    else:
+        updating_dict = {
+            k: v for k, v in ret.items() 
+            if check_group(k) and v is not globals.get(k, sentinel)
+        }
     globals.update(updating_dict)
     return updating_dict
 
@@ -438,21 +447,27 @@ def _run_env_tips(shell=None):
     print('在交互式命令行中，请先运行以下命令：\n\n\t%run env\n')
 
 
+def start_with_app(
+    app: str, 
+    *app_args: str, 
+    executable: str = sys.executable, 
+) -> subprocess.CompletedProcess:
+    return subprocess.run([app, *app_args, executable, *sys.argv])
+
+
 def start_nbterm(
     *args: str, 
     executable: str = sys.executable, 
-    shell: bool = _SYSTEM_IS_WINDOWS, 
     **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
     check_install('nbterm')
     if not args:
-        args = ('RUN FIRST ➜ %run env',)
+        args = _path.join(getcwd(), 'RUN FIRST ➜ %run env'),
     with _ctx_wrapper():
         _run_env_tips('nbterm')
-        return subprocess.run(
-            [executable, '-m', 'nbterm.nbterm', *args], 
-            shell=shell, **prun_kwds)
+        return prun_module(
+            'nbterm.nbterm', *args, executable=executable, **prun_kwds)
 
 
 def _ensure_pyqt5():
@@ -465,7 +480,6 @@ def _ensure_pyqt5():
 def start_qtconsole(
     *args: str, 
     executable: str = sys.executable, 
-    shell: bool = _SYSTEM_IS_WINDOWS, 
     **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a qtconsole process, and wait until it is terminated.'
@@ -476,15 +490,13 @@ def start_qtconsole(
                 % colored('%run env', 'red', attrs=['bold', 'blink']),)
     with _ctx_wrapper():
         _run_env_tips('qtconsole')
-        return subprocess.run(
-            [executable, '-m', 'qtconsole', *args], 
-            shell=shell, **prun_kwds)
+        return prun_module(
+            'qtconsole', *args, executable=executable, **prun_kwds)
 
 
 def start_spyder(
     *args: str, 
     executable: str = sys.executable, 
-    shell: bool = _SYSTEM_IS_WINDOWS, 
     **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a spyder IDE process, and wait until it is terminated.'
@@ -503,9 +515,8 @@ def start_spyder(
         env['HOME'] = _OUTDIR
     with _ctx_wrapper():
         _run_env_tips('spyder')
-        return subprocess.run(
-            [executable, '-m', 'spyder.app.start', *args], 
-            shell=shell, **prun_kwds)
+        return prun_module(
+            'spyder.app.start', *args, executable=executable, **prun_kwds)
 
 
 def start_jupyter_notebook(
@@ -519,7 +530,8 @@ def start_jupyter_notebook(
         args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter notebook')
-        return prun_module('jupyter', 'notebook', *args, **prun_kwds)
+        return prun_module(
+            'jupyter', 'notebook', *args, executable=executable, **prun_kwds)
 
 
 def start_jupyter_lab(
@@ -533,7 +545,8 @@ def start_jupyter_lab(
         args = ('--notebook-dir="."', '--ServerApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter lab')
-        return prun_module('jupyter', 'lab', *args, **prun_kwds)
+        return prun_module(
+            'jupyter', 'lab', *args, executable=executable, **prun_kwds)
 
 
 def start_python_shell(

@@ -1,16 +1,16 @@
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
+__version__ = (0, 0, 2)
+__all__ = ['as_thread', 'as_threads', 'timethis', 'with_lock', 
+           'context', 'suppressed']
 
 from concurrent.futures import Future
 from threading import current_thread, Lock, Thread
 from time import perf_counter
-from typing import overload, Callable, List, Optional, TypeVar, Tuple, Union
+from typing import (
+    overload, Callable, List, Optional, Type, TypeVar, Tuple, Union
+)
 
 from .decorator import optional_decorate
-
-
-__all__ = ['as_thread', 'as_threads', 'timethis', 'with_lock', 
-           'context', 'suppressed']
 
 
 T = TypeVar('T')
@@ -127,7 +127,10 @@ def suppressed(
     fn: Callable[..., T], 
     /, 
     default: T, 
-    exceptions: Union[BaseException, Tuple[BaseException, ...]], 
+    exceptions: Union[
+        Type[BaseException], 
+        Tuple[Type[BaseException], ...]
+    ], 
 ) -> Callable[..., T]:
     ...
 
@@ -136,7 +139,10 @@ def suppressed(
     fn: Callable[..., T], 
     /, 
     default: None, 
-    exceptions: Union[BaseException, Tuple[BaseException, ...]], 
+    exceptions: Union[
+        Type[BaseException], 
+        Tuple[Type[BaseException], ...]
+    ], 
 ) -> Callable[..., Optional[T]]:
     ...
 
