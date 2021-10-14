@@ -8,6 +8,7 @@ __all__ = ['watch']
 # TODO: 移动文件到其他文件夹，那么这个文件所引用的那些文件，相对位置也会改变
 # TODO: created 事件时，文件不存在，则文件可能是被移动或删除，则应该注册一个回调，因为事件没有被正确处理
 
+plugin.ensure_import('watchdog')
 
 import logging
 import posixpath
@@ -25,8 +26,9 @@ from types import ModuleType
 from typing import overload, Final, List, Optional, Union
 from urllib.parse import quote, unquote
 
-plugin.ensure_import('watchdog')
-from watchdog.events import FileDeletedEvent, FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
+from watchdog.events import (
+    FileDeletedEvent, FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
+)
 from watchdog.observers import Observer
 
 
@@ -228,7 +230,7 @@ class SigilFileEventHandler(FileSystemEventHandler):
         self.logger = logger
         self._watchdir = watchdir
         self._prefix_len = len(watchdir)
-        self._opf_prefix = dirname(bc.get_opfbookpath()) + '/'
+        self._opf_prefix = bc._w.opf_dir + '/'
         if file_mtime is None:
             file_mtime = {
                 (p := path.join(WATCH_DIR, _to_syspath(bookpath))): 
@@ -237,7 +239,7 @@ class SigilFileEventHandler(FileSystemEventHandler):
             }
         self._file_mtime = file_mtime
         self._map_path_refset, self._map_ref_pathset = analyze(bc)
-        self._file_missing = {}
+        self._file_missing = defaultdict(list)
 
     def _add_bookpath_ref(self, content, bookpath, mime=None):
         if mime is None:
@@ -362,8 +364,8 @@ class SigilFileEventHandler(FileSystemEventHandler):
                             return
                         content = CRE_URL.sub(partial(css_repl, refby=refby), content)
                         open(refby_srcpath, 'w').write(content)
-                        self.on_modified(FileModifiedEvent(refby_srcpath))
-                    self._file_missing[refby_srcpath] = callback
+                        self.on_modified(FileModifiedEvent(refby_srcpath), _keep_callbacks=True)
+                    self._file_missing[refby_srcpath].append(callback)
                     continue
                 content = CRE_URL.sub(partial(css_repl, refby=refby), content)
             else:
@@ -407,8 +409,8 @@ class SigilFileEventHandler(FileSystemEventHandler):
                             elif tp == 'style':
                                 content = sub_url_in_hxml(content, refby, CRE_EL_STYLE)
                         open(refby_srcpath, 'w').write(content)
-                        self.on_modified(FileModifiedEvent(refby_srcpath))
-                    self._file_missing[refby_srcpath] = callback
+                        self.on_modified(FileModifiedEvent(refby_srcpath), _keep_callbacks=True)
+                    self._file_missing[refby_srcpath].append(callback)
                     continue
                 for tp in types:
                     if tp == 'ref':
@@ -418,7 +420,7 @@ class SigilFileEventHandler(FileSystemEventHandler):
                     elif tp == 'style':
                         content = sub_url_in_hxml(content, refby, CRE_EL_STYLE)
             open(refby_srcpath, 'w').write(content)
-            self.on_modified(FileModifiedEvent(refby_srcpath))
+            self.on_modified(FileModifiedEvent(refby_srcpath), _keep_callbacks=True)
 
     def on_created(self, event):
         src_path = event.src_path
@@ -479,9 +481,8 @@ class SigilFileEventHandler(FileSystemEventHandler):
         if fid is not None:
             delete(fid, bookpath)
 
-    def on_modified(self, event):
+    def on_modified(self, event, _keep_callbacks=False):
         src_path = event.src_path
-        self._file_missing.pop(src_path, None)
         if event.is_directory or basename(src_path).startswith('.'):
             return
         bookpath = _to_posixpath(src_path[self._prefix_len:])
@@ -496,6 +497,8 @@ class SigilFileEventHandler(FileSystemEventHandler):
             mtime = stat(src_path).st_mtime_ns
             if self._file_mtime.get(src_path) == mtime:
                 return
+            if not _keep_callbacks:
+                self._file_missing.pop(src_path, None)
             content = open(src_path, 'rb').read()
         except FileNotFoundError:
             return # The file may be deleted or moved
@@ -563,15 +566,16 @@ class SigilFileEventHandler(FileSystemEventHandler):
             self._add_bookpath_ref(content, dest_bookpath, mime)
 
         if src_path in self._file_missing:
-            callback = self._file_missing.pop(src_path)
+            callbacks = self._file_missing.pop(src_path)
             try:
                 mtime = stat(dest_path).st_mtime_ns
             except FileNotFoundError:
                 self._file_missing[dest_path] = callback
-            if mtime == old_mtime:
-                callback(dest_bookpath, dest_path)
+            else:
+                if mtime == old_mtime:
+                    for callback in callbacks:
+                        callback(dest_bookpath, dest_path)
         self._update_refby_files(bookpath, dest_bookpath, ls_refby)
-        print(self._file_missing)
 
 
 def watch():

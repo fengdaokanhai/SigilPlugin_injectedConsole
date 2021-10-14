@@ -152,7 +152,7 @@ def reload_shell(shell: str) -> None:
     restart_program(argv_)
 
 
-def back_shell(argv: List[str] = sys.argv) -> None:
+def back_shell(argv: List[str] = sys.argv, namespace=None) -> None:
     'back to previous shell (if any)'
     argv_: List[str] = argv.copy()
     try:
@@ -170,7 +170,9 @@ def back_shell(argv: List[str] = sys.argv) -> None:
         argv_[idx: idx + 2] = ['--shell', prev_shell]
     print(colored('[WARRNING]', 'yellow', attrs=['bold']), 'back to shell:', prev_shell)
     if _SYSTEM_IS_WINDOWS:
-        reload_embeded_shell(prev_shell)
+        if namespace is None:
+            namespace = sys._getframe(1).f_locals
+        reload_embeded_shell(prev_shell, namespace=namespace)
     else:
         restart_program(argv_)
 
@@ -555,31 +557,32 @@ def start_python_shell(
     banner: str = '', 
 ) -> None:
     'Start the specified Python shell.'
+    if getattr(builtins, '_injectedConsole_RUNPY', False):
+        if namespace is None:
+            namespace = sys._getframe(1).f_globals
+    else:
+        if namespace is None:
+            namespace = {}
+        container = get_container()
+        namespace.update({
+            'container': container, 
+            'bc': container['edit'], 
+            'bk': container['edit'], 
+            'bookcontainer': container['edit'], 
+            'w': _WRAPPER, 
+            'wrapper': _WRAPPER, 
+            'plugin': __import__('plugin_help'), 
+        })
+        _startup(namespace)
+        setattr(builtins, '_injectedConsole_RUNPY', True)
     try:
-        if getattr(builtins, '_injectedConsole_RUNPY', False):
-            if namespace is None:
-                namespace = sys._getframe(1).f_globals
-        else:
-            if namespace is None:
-                namespace = {}
-
-            container = get_container()
-            namespace.update({
-                'container': container, 
-                'bc': container['edit'], 
-                'bk': container['edit'], 
-                'bookcontainer': container['edit'], 
-                'w': _WRAPPER, 
-                'wrapper': _WRAPPER, 
-                'plugin': __import__('plugin_help'), 
-            })
-            _startup(namespace)
-            setattr(builtins, '_injectedConsole_RUNPY', True)
-
         start_specific_python_console(namespace, banner, shell)
         dump_wrapper()
     except BaseException:
         print(colored('[ERROR]', 'red', attrs=['bold']))
         print_exc()
-        back_shell()
+        if _SYSTEM_IS_WINDOWS:
+            reload_embeded_shell('python', banner, namespace)
+        else:
+            back_shell()
 

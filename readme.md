@@ -43,8 +43,15 @@ TODO: to be continued...
 - [yarl](https://pypi.org/project/yarl/)
 
 #### Styled Text
-- [rich](https://pypi.org/project/rich/)
 - [Pygments](https://pygments.org/)
+- [highlight.js](https://www.npmjs.com/package/highlight.js)
+- [prettify-js](https://www.npmjs.com/package/prettify-js)
+- [pandoc](https://github.com/boisgera/pandoc)
+- [mistune](https://pypi.org/project/mistune/)
+- [Markdown](https://pypi.org/project/Markdown/)
+- [markdown-katex](https://pypi.org/project/markdown-katex/)
+- [latex2mathml](https://pypi.org/project/latex2mathml/)
+- [mdtex2html](https://pypi.org/project/mdtex2html/)
 
 #### Parser or Selector 
 - [lxml](https://pypi.org/project/lxml/)
@@ -68,6 +75,12 @@ TODO: to be continued...
 - [OpenCC](https://pypi.org/project/OpenCC/)
 - [pypinyin](https://pypi.org/project/pypinyin/)
 
+#### TUI
+- [ncurses](https://invisible-island.net/ncurses/)
+- [rich](https://pypi.org/project/rich/)
+- [Urwid](http://urwid.org/)
+- [blessed](https://pypi.org/project/blessed/)
+
 #### GUI
 - [PyQt5](https://pypi.org/project/PyQt5/)
 - [PyQt4](https://pypi.org/project/PyQt4/)
@@ -78,8 +91,6 @@ TODO: to be continued...
 - [tkdnd](https://github.com/petasis/tkdnd)
 - [TkinterDnD2](https://github.com/pmgagne/tkinterdnd2)
 - [tkinterdnd2](https://pypi.org/project/tkinterdnd2/)
-- [Urwid](http://urwid.org/)
-- [blessed](https://pypi.org/project/blessed/)
 
 #### Debug
 - [pytest](https://pypi.org/project/pytest/)
