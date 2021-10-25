@@ -24,7 +24,7 @@ from shutil import copyfile
 from tempfile import TemporaryDirectory
 from types import ModuleType
 from typing import overload, Final, List, Optional, Union
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from watchdog.events import (
     FileDeletedEvent, FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
@@ -34,13 +34,14 @@ from watchdog.observers import Observer
 
 bc = bc
 
-CRE_PROT: Final[Pattern] = re_compile(r'^\w+:/')
+CRE_PROT: Final[Pattern] = re_compile(r'^\w+://')
 CRE_REF: Final[Pattern] = re_compile(
     r'(<[^/][^>]*?[\s:](?:href|src)=")(?P<link>[^>"]+)')
 CRE_URL: Final[Pattern] = re_compile(
     r'\burl\(\s*(?:"(?P<dlink>(?:[^"]|(?<=\\)")+)"|'
     r'\'(?P<slink>(?:[^\']|(?<=\\)\')+)\'|(?P<link>[^)]+))\s*\)')
-CRE_EL_STYLE: Final[Pattern] = re_compile(r'<style ?[^>]*>((?s:.+?))</style>')
+CRE_EL_STYLE: Final[Pattern] = re_compile(
+    r'<style(?:\s[^>]*|)>((?s:.+?))</style>')
 CRE_INLINE_STYLE: Final[Pattern] = re_compile(r'<[^/][^>]*?\sstyle="([^"]+)"')
 
 LOGGER: Final[logging.Logger] = logging.getLogger('watch')
@@ -233,7 +234,7 @@ class SigilFileEventHandler(FileSystemEventHandler):
         self._opf_prefix = bc._w.opf_dir + '/'
         if file_mtime is None:
             file_mtime = {
-                (p := path.join(WATCH_DIR, _to_syspath(bookpath))): 
+                (p := path.join(watchdir, _to_syspath(bookpath))): 
                     stat(p).st_mtime_ns
                 for bookpath in bc._w.bookpath_to_id
             }
@@ -281,39 +282,41 @@ class SigilFileEventHandler(FileSystemEventHandler):
             ca = posixpath.commonprefix((src, ref)).count('/')
             return '../' * (src.count('/') - ca) + '/'.join(ref.split('/')[ca:])
 
-        def css_repl(m, refby):
-            dest_href = quote(rel_ref(refby, dest_bookpath))
+        def url_repl(m, refby):
             try:
-                link = unquote(next(filter(None, m.groups())))
+                link = next(filter(None, m.groups()))
             except StopIteration:
                 return m[0]
+
+            urlparts = urlparse(link)
+            link = unquote(urlparts.path)
             if link in ('', '.') or CRE_PROT.match(link) is not None:
                 return m[0]
-            full_link = relative_path(link, refby, lib=posixpath)
-            if full_link == bookpath:
-                return 'url("%s")' % dest_href
+
+            if relative_path(link, refby, lib=posixpath) == bookpath:
+                return 'url("%s")' % urlunparse(urlparts._replace(
+                    path=quote(rel_ref(refby, dest_bookpath))
+                ))
             else:
                 return m[0]
 
-        def hxml_repl(m, refby):
-            dest_href = quote(rel_ref(refby, dest_bookpath))
+        def ref_repl(m, refby):
             link = m['link']
-            link, hashtag, suffix = link.partition('#')
-            link = unquote(link)
+            urlparts = urlparse(link)
+            link = unquote(urlparts.path)
             if link in ('', '.') or CRE_PROT.match(link) is not None:
                 return m[0]
-            full_link = relative_path(link, refby, lib=posixpath)
-            if full_link == bookpath:
-                if not hashtag:
-                    return m[1] + dest_href
-                return '%s%s#%s' % (m[1], dest_href, suffix)
+            if relative_path(link, refby, lib=posixpath) == bookpath:
+                return m[1] + urlunparse(urlparts._replace(
+                    path=quote(rel_ref(refby, dest_bookpath))
+                ))
             else:
                 return m[0]
 
         def sub_url_in_hxml(text, refby, cre=CRE_EL_STYLE):
             ls_repl_part = []
             for match in cre.finditer(text):
-                repl_part, n = CRE_URL.subn(partial(css_repl, refby=refby), match[0])
+                repl_part, n = CRE_URL.subn(partial(url_repl, refby=refby), match[0])
                 if n > 0:
                     ls_repl_part.append((match.span(), repl_part))
             if ls_repl_part:
@@ -328,7 +331,6 @@ class SigilFileEventHandler(FileSystemEventHandler):
                 return ''.join(text_parts)
             return text
 
-        secure_mtimes = {}
         for refby in ls_refby:
             if type(refby) is str:
                 if refby == bookpath:
@@ -362,12 +364,12 @@ class SigilFileEventHandler(FileSystemEventHandler):
                                 bookpath, dest_bookpath, refby_srcpath
                             )
                             return
-                        content = CRE_URL.sub(partial(css_repl, refby=refby), content)
+                        content = CRE_URL.sub(partial(url_repl, refby=refby), content)
                         open(refby_srcpath, 'w').write(content)
                         self.on_modified(FileModifiedEvent(refby_srcpath), _keep_callbacks=True)
                     self._file_missing[refby_srcpath].append(callback)
                     continue
-                content = CRE_URL.sub(partial(css_repl, refby=refby), content)
+                content = CRE_URL.sub(partial(url_repl, refby=refby), content)
             else:
                 refby, types = refby
                 if refby == bookpath:
@@ -403,7 +405,7 @@ class SigilFileEventHandler(FileSystemEventHandler):
                             return
                         for tp in types:
                             if tp == 'ref':
-                                content = CRE_REF.sub(partial(hxml_repl, refby=refby), content)
+                                content = CRE_REF.sub(partial(ref_repl, refby=refby), content)
                             elif tp == 'inline':
                                 content = sub_url_in_hxml(content, refby, CRE_INLINE_STYLE)
                             elif tp == 'style':
@@ -414,7 +416,7 @@ class SigilFileEventHandler(FileSystemEventHandler):
                     continue
                 for tp in types:
                     if tp == 'ref':
-                        content = CRE_REF.sub(partial(hxml_repl, refby=refby), content)
+                        content = CRE_REF.sub(partial(ref_repl, refby=refby), content)
                     elif tp == 'inline':
                         content = sub_url_in_hxml(content, refby, CRE_INLINE_STYLE)
                     elif tp == 'style':

@@ -5,7 +5,7 @@
 <author>ChenyangGao(https://chenyanggao.github.io/)</author>
 <description>open a new terminal, start a python interactive environment and inject the relevant context.</description>
 <engine>python3.4</engine>
-<version>0.1.8</version>
+<version>0.1.9</version>
 <autostart>true</autostart>
 <autoclose>true</autoclose>
 <oslist>osx,win,unx</oslist>

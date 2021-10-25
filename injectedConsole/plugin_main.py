@@ -28,7 +28,8 @@ import builtins, os, sys
 from typing import Final, Mapping
 from types import MappingProxyType
 
-_injectedConsole_CONFIG: Final[dict] = __import__('pickle').load(open(args.args, 'rb'))
+
+_injectedConsole_CONFIG: Final[dict] = __import__('json').load(open(args.args))
 _injectedConsole_PATH: Final[Mapping[str, str]] = MappingProxyType(_injectedConsole_CONFIG['path'])
 setattr(builtins, '_injectedConsole_CONFIG', _injectedConsole_CONFIG)
 setattr(builtins, '_injectedConsole_PATH', _injectedConsole_PATH)

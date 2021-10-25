@@ -2,7 +2,7 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 2)
+__version__ = (0, 0, 3)
 __all__ = ['TkinterXMLConfigParser']
 
 # Reference:
@@ -667,13 +667,16 @@ class TkinterXMLConfigParser:
             locals = ChainMap(
                 globals, globals.get('namemap', self._namemap), extras)
 
+        pargs = tuple(self.parse_element(child, parent, globals) for child in el)
+
         args_str = el_attrib.get('args-')
         pargs: tuple
         kargs: dict
         if args_str is None:
-            pargs, kargs = (), {}
+            kargs = {}
         else:
-            pargs, kargs = parse_args(args_str, globals, locals)
+            pargs_, kargs = parse_args(args_str, globals, locals)
+            pargs += pargs_
 
         kargs.update(
             (k, parse_arg(v, globals, locals))

@@ -53,6 +53,10 @@ TODO: to be continued...
 - [latex2mathml](https://pypi.org/project/latex2mathml/)
 - [mdtex2html](https://pypi.org/project/mdtex2html/)
 
+#### Image
+- [Pillow](https://pypi.org/project/Pillow/)
+- [opencv-python](https://pypi.org/project/opencv-python/)
+
 #### Parser or Selector 
 - [lxml](https://pypi.org/project/lxml/)
 - [pyquery](https://pypi.org/project/pyquery/)
@@ -105,3 +109,7 @@ TODO: to be continued...
 - [pyre-check](https://pypi.org/project/pyre-check/)
 - [pydantic](https://pypi.org/project/pydantic/)
 - [typeguard](https://pypi.org/project/typeguard/)
+
+#### Others
+- [watchdog](https://pypi.org/project/watchdog/)
+

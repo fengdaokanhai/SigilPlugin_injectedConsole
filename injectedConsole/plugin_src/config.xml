@@ -10,11 +10,15 @@
     def set_config(config):
         namemap['cb_selsh']['values'] = SHELLS
         namemap['cb_selsh'].current(SHELLS.index(config['shell']))
-        namemap['startup_errors'].set(config['errors'])
+        namemap['startup_errors'].set(config.get('errors', 'ignore'))
         namemap['lb'].replace(config['startup'])
+        namemap['input_terminal'].set(config.get('terminal', ''))
+        namemap['input_terminal_args'].set(config.get('terminal_args', ''))
+        namemap['input_terminal_wait'].set(True)
 
     def ask_save_config_dialog():
         val = ask_save_config()
+        print(config['config'])
         if val is not None:
             config['configs'].append([val, deepcopy(config['config'])])
 
@@ -22,7 +26,10 @@
         ask_load_config()
 
     def new_config():
-        config['config'] = {'shell': 'python', 'errors': 'ignore', 'startup': []}
+        config['config'] = {
+            'shell': 'python', 'errors': 'ignore', 'startup': [], 
+            'terminal': '', 'terminal_args': '', 'terminal_wait': True, 
+        }
         set_config(config['config'])
 
     def save_to_file():
@@ -57,6 +64,12 @@
 
     def click_move_down():
         namemap['lb'].onKeyDown()
+
+    def click_move_top():
+        namemap['lb'].moveTop()
+
+    def click_move_bottom():
+        namemap['lb'].moveBottom()
 
     try:
         def startfile(path, _start=__import__('os').startfile):
@@ -110,6 +123,12 @@
 
         def click_move_down():
             namemap['lb2'].onKeyDown()
+
+        def click_move_top():
+            namemap['lb2'].moveTop()
+
+        def click_move_bottom():
+            namemap['lb2'].moveBottom()
          </script>
         <frame>
             <button text="Delete Selected" width="15" command="([btn_click_del_lb_sel])" m-pack="side=left">
@@ -120,11 +139,17 @@
             </button>
         </frame>
         <frame>
-            <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" >
+            <button text="↥" width="1" command="([click_move_up])" m-pack="side=left" >
                 <Tooltip text="Move selected items up" />
             </button>
-            <button text="⤓" width="1" command="([click_move_down])" m-pack="side=left" >
+            <button text="↧" width="1" command="([click_move_down])" m-pack="side=left" >
                 <Tooltip text="Move selected items down" />
+            </button>
+            <button text="🔝" width="1" command="([click_move_top])" m-pack="side=left" >
+                <Tooltip text="Move selected items up to top" />
+            </button>
+            <button text="⤓" width="1" command="([click_move_bottom])" m-pack="side=left" >
+                <Tooltip text="Move selected items down to bottom" />
             </button>
         </frame>
         <MultiListbox 
@@ -164,69 +189,130 @@
         </script>
     </toplevel>
     <label bd="1" relief="sunken" anchor="w" m-pack="side=top,fill=x" text="close the window to take effect" bg="red" fg="yellow" font="([font_bold_underline])" />
-    <label text="Select a Shell" height="2" font="([font_bold_underline])">
-        <Tooltip text="Select a shell to start (Missing dependencies will be automatically installed)" />
-    </label>
-    <ttk.combobox name-="cb_selsh" state="readonly" />
-    <ttk.separator orient="horizontal" m-pack="fill=x" />
-    <script type="text/python">
-    def cb_set_shell(event):
-        config['config']['shell'] = event.widget.get()
+    <ttk.notebook m-pack="expand=true, fill=both">
+        <m-add text='basic'>
+            <frame>
+                <label text="Select a Shell" height="2" font="([font_bold_underline])">
+                    <Tooltip text="Select a shell to start (Missing dependencies will be automatically installed)" />
+                </label>
+                <ttk.combobox name-="cb_selsh" state="readonly" >
+                    <Tooltip text="&lt;config::shell&gt;" />
+                </ttk.combobox>
+                <ttk.separator orient="horizontal" m-pack="fill=x" />
+                <script type="text/python">
+                def cb_set_shell(event):
+                    config['config']['shell'] = event.widget.get()
 
-    cb_selsh.bind("&lt;&lt;ComboboxSelected&gt;&gt;", cb_set_shell)
-    cb_selsh.bind("&lt;Return&gt;", lambda event: __app__.quit())
-    </script>
-    <label text="Select Some Startups" height="2" font="([font_bold_underline])">
-        <Tooltip args-="text=([el_text])" >WARNING: PLEASE CONFIRM THE SECURITY OF THE ADDED STARTUP BY YOURSELF IN ADVANCE.
+                cb_selsh.bind("&lt;&lt;ComboboxSelected&gt;&gt;", cb_set_shell)
+                cb_selsh.bind("&lt;Return&gt;", lambda event: __app__.quit())
+                </script>
+                <label text="Add Some Startups" height="2" font="([font_bold_underline])">
+                    <Tooltip args-="text=([el_text])" >&lt;config::startup&gt;
+WARNING: PLEASE CONFIRM THE SECURITY OF THE ADDED STARTUP BY YOURSELF IN ADVANCE.
 
 Add some scripts that will be executed or registered automatically at startup.
 
 It will deal with the following situations separately:
     1. execute:  A file (e.g., suffixed by .py or .pyz), or a folder (or a .zip file) with __main__.py, will be executed directly.
     2. register: A folder (or .zip file) without __main__.py will be appended to sys.path.
-        </Tooltip>
-    </label>
-    <frame>
-        <StringVar value="ignore" name-="startup_errors" />
-        <label text="Errors" m-grid="row=0,column=0" font="([font_bold_underline])" >
-            <Tooltip text="How to deal with errors?" />
-        </label>
-        <radiobutton variable="([startup_errors])" text="ignore" value="ignore" m-grid="row=0,column=1" command="([change_startup_errors])">
-            <Tooltip text="To ignore the error and continue processing the remaining startups" />
-        </radiobutton>
-        <radiobutton variable="([startup_errors])" text="raise" value="raise" m-grid="row=0,column=2" command="([change_startup_errors])">
-            <Tooltip text="To raise an exception and terminate" />
-        </radiobutton>
-        <radiobutton variable="([startup_errors])" text="stop" value="stop" m-grid="row=0,column=3" command="([change_startup_errors])">
-            <Tooltip text="Stop processing the remaining startups and go directly to the shell" />
-        </radiobutton>
-    </frame>
-    <frame>
-        <button text="Add Files" width="15" command="([click_add_file])" m-pack="side=left">
-            <Tooltip text="Add Files" />
-        </button>
-        <button text="Add Folder" width="15" command="([click_add_dir])" m-pack="side=left">
-            <Tooltip text="Add Folder" />
-        </button>
-    </frame>
-    <frame>
-        <button text="Delete Selected" width="15" command="([click_del_sel])" m-pack="side=left">
-            <Tooltip text="Delete Selected" />
-        </button>
-        <button text="Clear All" width="15" command="([click_clear])" m-pack="side=left">
-            <Tooltip text="Clear All" />
-        </button>
-    </frame>
-    <frame>
-        <button text="⤒" width="1" command="([click_move_up])" m-pack="side=left" >
-            <Tooltip text="Move selected items up" />
-        </button>
-        <button text="⤓" width="1" command="([click_move_down])" m-pack="side=left" >
-            <Tooltip text="Move selected items down" />
-        </button>
-    </frame>
-    <DragDropListbox name-="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" />
-    <scrollbar name-="sc" orient="vertical" m-pack="side=left,fill=y"/>
+                    </Tooltip>
+                </label>
+                <frame>
+                    <StringVar value="ignore" name-="startup_errors" />
+                    <label text="Errors" m-grid="row=0,column=0" font="([font_bold_underline])" >
+                        <Tooltip text="&lt;config::errors&gt;&#xa;How to deal with errors?" />
+                    </label>
+                    <radiobutton variable="([startup_errors])" text="ignore" value="ignore" m-grid="row=0,column=1" command="([change_startup_errors])">
+                        <Tooltip text="To ignore the error and continue processing the remaining startups" />
+                    </radiobutton>
+                    <radiobutton variable="([startup_errors])" text="raise" value="raise" m-grid="row=0,column=2" command="([change_startup_errors])">
+                        <Tooltip text="To raise an exception and terminate" />
+                    </radiobutton>
+                    <radiobutton variable="([startup_errors])" text="stop" value="stop" m-grid="row=0,column=3" command="([change_startup_errors])">
+                        <Tooltip text="Stop processing the remaining startups and go directly to the shell" />
+                    </radiobutton>
+                </frame>
+                <frame>
+                    <button text="Add Files" width="15" command="([click_add_file])" m-pack="side=left">
+                        <Tooltip text="Add Files" />
+                    </button>
+                    <button text="Add Folder" width="15" command="([click_add_dir])" m-pack="side=left">
+                        <Tooltip text="Add Folder" />
+                    </button>
+                </frame>
+                <frame>
+                    <button text="Delete Selected" width="15" command="([click_del_sel])" m-pack="side=left">
+                        <Tooltip text="Delete Selected" />
+                    </button>
+                    <button text="Clear All" width="15" command="([click_clear])" m-pack="side=left">
+                        <Tooltip text="Clear All" />
+                    </button>
+                </frame>
+                <frame>
+                    <button text="↥" width="1" command="([click_move_up])" m-pack="side=left" >
+                        <Tooltip text="Move selected items up" />
+                    </button>
+                    <button text="↧" width="1" command="([click_move_down])" m-pack="side=left" >
+                        <Tooltip text="Move selected items down" />
+                    </button>
+                    <button text="🔝" width="1" command="([click_move_top])" m-pack="side=left" >
+                        <Tooltip text="Move selected items up to top" />
+                    </button>
+                    <button text="⤓" width="1" command="([click_move_bottom])" m-pack="side=left" >
+                        <Tooltip text="Move selected items down to bottom" />
+                    </button>
+                </frame>
+                <DragDropListbox name-="lb" selectmode="extended" m-pack="side=left,fill=both,expand=([True])" >
+                    <Tooltip text="&lt;config::startup&gt;" />
+                </DragDropListbox>
+                <scrollbar name-="sc" orient="vertical" m-pack="side=left,fill=y"/>
+            </frame>
+        </m-add>
+        <m-add text='environment'>
+            <frame>
+                <StringVar name-="input_terminal" />
+                <StringVar name-="input_terminal_args" />
+                <BooleanVar name-="input_terminal_wait" />
+                <script type="text/python">
+                def btn_ask_terminal():
+                    filname = filedialog.askopenfilename()
+                    if filname:
+                        namemap['input_terminal'].set(filname)
+
+                input_terminal.trace('w', lambda *args: config['config'].update(terminal=namemap['input_terminal'].get()))
+                input_terminal_args.trace('w', lambda *args: config['config'].update(terminal_args=namemap['input_terminal_args'].get()))
+                input_terminal_wait.trace('w', lambda *args: config['config'].update(terminal_wait=namemap['input_terminal_wait'].get()))
+                </script>
+                <label text="Terminal" m-grid="row=0, column=0" >
+                    <Tooltip  args-="text=([el_text])" >Please enter the executable path of a terminal app.
+
+If not specified, it is automatically selected according to the platform:
+  - Windows: powershell.exe
+  - Mac OSX: Terminal.app
+  - Linux: The operating system default terminal app.
+</Tooltip>
+                </label>
+                <entry textvariable="([input_terminal])" m-grid="row=0, column=1" >
+                    <Tooltip text="&lt;config::terminal&gt;" />
+                </entry>
+                <button text="…" m-grid="row=0, column=2" command="([btn_ask_terminal])" >
+                    <Tooltip text="Select an executable" />
+                </button>
+                <label text="Arguments" m-grid="row=1, column=0" >
+                    <Tooltip text="Please specify some arguments to the above terminal app." />
+                </label>
+                <entry textvariable="([input_terminal_args])" m-grid="row=1, column=1" >
+                    <Tooltip text="&lt;config::terminal_args&gt;" />
+                </entry>
+                <Checkbutton text="wait" variable="([input_terminal_wait])" state="disabled" m-grid="row=1, column=2" >
+                    <Tooltip text="&lt;config::terminal_wait&gt;&#xa;The plug-in will wait for the terminal app to exit" />
+                </Checkbutton>
+            </frame>
+        </m-add>
+         <m-add text='packages'>
+            <label text="Coming soon ..." font="([Font(weight='bold', size=20)])" m-pack="expand=true, fill=both" />
+         </m-add>
+    </ttk.notebook>
     <script type="text/python">
     def lb_startfile(event):
         path = event.widget.get(event.widget.curselection())

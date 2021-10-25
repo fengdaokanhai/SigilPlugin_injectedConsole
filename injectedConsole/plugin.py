@@ -2,8 +2,8 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 1, 8)
-__revision__ = 9
+__version__ = (0, 1, 9)
+__revision__ = 0
 
 import sys
 if sys.version_info < (3, 8):

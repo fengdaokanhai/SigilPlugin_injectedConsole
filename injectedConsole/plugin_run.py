@@ -3,16 +3,14 @@
 
 __all__ = ['run']
 
+# TODO: Allow users to set the configuration of `pip`
 # TODO: Allow users to create `venv`
-# TODO: Allow users to choose a terminal app
 
 import builtins
 import json
-import pickle
 import sys
 
 from contextlib import contextmanager
-from copy import deepcopy
 from importlib import import_module
 from os import path
 from typing import Final, Optional, Tuple
@@ -44,6 +42,7 @@ def _import_all(mod_name):
     return {k: get(k) for k in mod.__all__}
 
 
+'''
 @contextmanager
 def _ctx_conifg():
     try:
@@ -56,19 +55,28 @@ def _ctx_conifg():
 
     if old_config != config:
         json.dump(config, open(CONFIG_JSON_FILE, 'w', encoding='utf-8'), ensure_ascii=False)
+'''
 
 
-def get_config_webui() -> dict:
+@contextmanager
+def _ctx_conifg(bc):
+    config = bc.getPrefs()
+    yield config
+    bc.savePrefs(config)
+
+
+def update_config_webui() -> dict:
     raise NotImplementedError
 
 
-def get_config_tui() -> dict:
+def update_config_tui() -> dict:
     raise NotImplementedError
 
 
-def get_config_gui_tk(
+def update_config_gui_tk(
     # Tips: After closing the `tkinter` GUI in Mac OSX, it will get stuck, 
     # so I specify to run the `tkinter` GUI in a new process.
+    config: dict, 
     new_process: bool = _IS_MACOS, 
 ) -> dict:
     try:
@@ -78,34 +86,31 @@ def get_config_gui_tk(
         print('WARNING:', 'Probably cannot import `tkinter` module, skipping configuration...')
         return {}
     if new_process:
-        return run_in_process(get_config_gui_tk, False)
+        config_new = run_in_process(update_config_gui_tk, config, False)
+        config.clear()
+        config.update(config_new)
+        return config
     else:
-        with _ctx_conifg() as config:
-            if 'config' not in config:
-                config['config'] = {'shell': 'python', 'errors': 'ignore', 'startup': []}
-            if 'configs' not in config:
-                config['configs'] = []
-            namespace = _import_all('plugin_util.tkinter_extensions')
-            namespace.update(config=config, SHELLS=SHELLS)
+        if 'config' not in config:
+            config['config'] = {'shell': 'python', 'errors': 'ignore', 'startup': []}
+        if 'configs' not in config:
+            config['configs'] = []
+        namespace = _import_all('plugin_util.tkinter_extensions')
+        namespace.update(config=config, SHELLS=SHELLS)
 
-            tkapp = TkinterXMLConfigParser(
-                path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), namespace)
-            tkapp.start()
-
-            return config
+        tkapp = TkinterXMLConfigParser(
+            path.join(MUDULE_DIR, 'plugin_src', 'config.xml'), namespace)
+        tkapp.start()
+        return config
 
 
-def get_config_gui_qt(new_process: bool = _IS_MACOS) -> dict:
+def update_config_gui_qt(new_process: bool = _IS_MACOS) -> dict:
     raise NotImplementedError
 
 
-# TODO: If there no tkinter, then using PyQt5
-def get_config_gui(new_process: bool = _IS_MACOS):
-    return get_config_gui_tk(new_process)
-
-
 def run(bc) -> Optional[int]:
-    config = get_config_gui().get('config', {})
+    with _ctx_conifg(bc) as config:
+        config = update_config_gui_tk(config).get('config')
 
     laucher_file, ebook_root, outdir, _, target_file = sys.argv
     this_plugin_dir = path.dirname(target_file)
@@ -148,7 +153,7 @@ else:
     # Injecting builtins variable: _injectedConsole_PATH
     __builtins._injectedConsole_PATH = __import__('types').MappingProxyType({pathes!r})
     # Injecting builtins variable: _injectedConsole_CONFIG
-    __builtins._injectedConsole_CONFIG = __import__('pickle').loads({pickle.dumps(config)!r})
+    __builtins._injectedConsole_CONFIG = __import__('json').loads({json.dumps(config)!r})
 
     # Injecting module pathes
     __sys_path = __import__('sys').path
@@ -179,7 +184,7 @@ else:
 
 del __builtins
 ''')
-    print('WARNING:', 'Created environment initialization script in file\n%r\n' %envfile)
+    print('WARNING:', 'Created environment initialization script file\n%r\n' %envfile)
 
     __import__('os').chdir(outdir)
 
@@ -191,11 +196,17 @@ del __builtins
     else:
         from plugin_util.terminal import start_terminal
 
-        pickle.dump(config, open(argsfile, 'wb'))
+        json.dump(config, open(argsfile, 'w'))
         args = [sys.executable, mainfile, '--args', argsfile]
         if shell:
             args.extend(('--shell', shell))
-        start_terminal(args)
+        kwds = {}
+        if config.get('terminal'):
+            kwds['app'] = config['terminal']
+        if config.get('terminal_args'):
+            kwds['app_args'] = config['terminal_args']
+        kwds['wait'] = config.get('terminal_wait', True)
+        start_terminal(args, **kwds)
 
     # check whether the console is aborted.
     if path.exists(abortfile):

@@ -9,7 +9,7 @@
 
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 4)
+__version__ = (0, 0, 5)
 
 import os
 import pickle
@@ -20,7 +20,7 @@ import uuid
 from contextlib import contextmanager
 from enum import Enum
 from os import getcwd, getpid, remove, path as _path
-from shlex import quote as shlex_quote
+from shlex import quote as shlex_quote, split as shlex_split
 from subprocess import run as sprun, CompletedProcess
 from tempfile import NamedTemporaryFile
 from typing import (
@@ -77,7 +77,10 @@ def start_terminal(cmd, **kwargs) -> CompletedProcess:
     if _PLATFORM == 'Windows':
         return start_windows_terminal(cmd, **kwargs)
     elif _PLATFORM == 'Darwin':
-        return start_macosx_terminal(cmd, **kwargs)
+        # TODO: Solve the custom terminal, just as Linux does
+        if kwargs.get('terminal', 'Terminal.app') == 'Terminal.app':
+            return start_macosx_terminal(cmd, **kwargs)
+        return open_macosx_terminal(cmd, **kwargs)
     elif _PLATFORM == 'Linux':
         return start_linux_terminal(cmd, **kwargs)
     else:
@@ -88,7 +91,7 @@ def start_terminal(cmd, **kwargs) -> CompletedProcess:
 def start_windows_terminal(
     cmd: Union[str, Sequence[str]], 
     app: Optional[str] = 'powershell',
-    app_args: Union[None, Sequence[str]] = None,
+    app_args: Union[None, str, Sequence[str]] = None, 
     wait: bool = True,
     with_tempfile: bool = False,
     tempfile_suffix: str = '.cmd',
@@ -102,6 +105,8 @@ def start_windows_terminal(
         if app_args is None:
             if app in ('cmd', 'cmd.exe'):
                 split_command.append('/c')
+        elif isinstance(app_args, str):
+            split_command.extend(shlex_split(app_args, posix=False))
         else:
             split_command.extend(app_args)
     if with_tempfile:
@@ -300,7 +305,7 @@ def _send_pid_to_server(env=None):
 def start_linux_terminal(
     cmd: Union[str, Sequence[str]], 
     app: Optional[str] = None, 
-    app_args: Union[None, Sequence[str]] = None, 
+    app_args: Union[None, str, Sequence[str]] = None, 
     wait: bool = True, 
     with_tempfile: bool = False, 
     tempfile_suffix: str = '.sh', 
@@ -351,7 +356,10 @@ def start_linux_terminal(
     if app_args is None:
         app_name = app.rsplit('/', 1)[-1]
         app_args = cast(List[str], terminal_app_execute_args.get(app_name, []))
-    split_command.extend(app_args)
+    elif isinstance(app_args, str):
+        split_command.extend(shlex_split(app_args))
+    else:
+        split_command.extend(app_args)
     with ensure_cm(_wait_for_client() if wait else None) as port:
         if with_tempfile:
             with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
@@ -391,8 +399,9 @@ def _get_wait_for_str(
 
 def start_macosx_terminal(
     cmd: Union[str, Sequence[str]], 
-    app: str = 'Terminal.app',
-    wait: bool = True,
+    app: str = 'Terminal.app', 
+    app_args: Union[None, str, Sequence[str]] = None, 
+    wait: bool = True, 
     wait_event: Union[int, str, AppleScriptWaitEvent] = AppleScriptWaitEvent.exists,
     with_tempfile: bool = False,
     tempfile_suffix: str = '.command',
@@ -426,8 +435,8 @@ end tell''' % _get_wait_for_str(wait_event)
 
 def open_macosx_terminal(
     cmd: Union[str, Sequence[str]], 
-    app: Optional[str] = 'Terminal.app',
-    app_args: Union[None, Sequence[str]] = None,
+    app: str = 'Terminal.app', 
+    app_args: Union[None, str, Sequence[str]] = None, 
     wait: bool = True,
     with_tempfile: bool = False,
     tempfile_suffix: str = '.command',
@@ -439,8 +448,10 @@ def open_macosx_terminal(
         split_command.append('-W')
     if app:
         split_command.extend(('-a', app))
-    if app_args:
-         split_command.extend(app_args)
+    if isinstance(app_args, str):
+        split_command.extend(shlex_split(app_args))
+    else:
+        split_command.extend(app_args)
     if with_tempfile:
         with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
             sprun(['chmod', '+x', f.name], check=True)

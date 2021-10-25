@@ -2,7 +2,7 @@
 # coding: utf-8
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 1)
+__version__ = (0, 0, 2)
 __all__ = ['DragDropListbox', 'MultiListbox', 'Tooltip']
 
 
@@ -64,6 +64,30 @@ class DragDropListbox(tkinter.Listbox):
         self.insert(i + (1 if i < self.curIndex else -1), item)
         self.curIndex = i
         return "break"
+
+    def moveTop(self):
+        sels = self.curselection()
+        if not sels:
+            return
+        if sels:
+            insert_pos = 0
+            items = [self.get(sel) for sel in sels]
+            for sel in reversed(sels):
+                self.delete(sel)
+            self.insert(insert_pos, *items)
+            self.selection_set(insert_pos, insert_pos + len(sels) - 1)
+
+    def moveBottom(self):
+        sels = self.curselection()
+        if not sels:
+            return
+        if sels:
+            insert_pos = self.size() - len(sels)
+            items = [self.get(sel) for sel in sels]
+            for sel in reversed(sels):
+                self.delete(sel)
+            self.insert(insert_pos, *items)
+            self.selection_set(insert_pos, insert_pos + len(sels) - 1)
 
     def onKeyUp(self, event=None):
         if event is None:

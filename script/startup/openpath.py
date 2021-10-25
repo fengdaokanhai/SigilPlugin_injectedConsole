@@ -53,7 +53,6 @@ except AttributeError:
 def open_bookpath(bookpath: PathType) -> None:
     syspath = join(_OUTDIR, _to_syspath(bookpath))
     openpath(syspath)
-
 open_bookpath.__doc__ = '根据传入的相对路径，打开在目录 {_OUTDIR!r} 中对应文件'
 
 
