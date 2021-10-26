@@ -558,6 +558,9 @@ def read_iter(
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
     '''
+    bc = cast(BookContainer, _ensure_bc(bc))
+
+    it: Iterable[Tuple[str, str]]
     if manifest_id_s is None:
         it = (info[:2] for info in bc.manifest_iter())
     elif isinstance(manifest_id_s, str):
@@ -584,6 +587,9 @@ def read_html_iter(
         `BookContainer` object is an object of ePub book content provided by Sigil, 
         which can be used to access and operate the files in ePub.
     '''
+    bc = cast(BookContainer, _ensure_bc(bc))
+
+    it: Iterable[Tuple[str, str]]
     if manifest_id_s is None:
         it = (info[:2] for info in bc.text_iter())
     elif isinstance(manifest_id_s, str):
@@ -591,8 +597,8 @@ def read_html_iter(
     else:
         it = ((id, bc.id_to_href(id)) for id in manifest_id_s)
 
-    for fid in it:
-        yield fid, html_fromstring(bc.readfile(fid).encode('utf-8'))
+    for fid, href in it:
+        yield fid, href, html_fromstring(bc.readfile(fid).encode('utf-8'))
 
 
 def edit_iter(

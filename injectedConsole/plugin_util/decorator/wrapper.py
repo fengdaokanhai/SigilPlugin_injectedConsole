@@ -32,7 +32,7 @@ def as_thread(
                 ft.set_exception(exc)
 
         ft: Future = Future()
-        t = ft.thread = Thread(target=asfuture, daemon=daemon, **kwds)
+        t = ft.thread = Thread(target=asfuture, daemon=daemon, **kwds) # type: ignore
         t.start()
         if join:
             t.join()
@@ -126,26 +126,24 @@ def context(
 def suppressed(
     fn: Callable[..., T], 
     /, 
-    default: T, 
+    default: None = ..., 
     exceptions: Union[
         Type[BaseException], 
         Tuple[Type[BaseException], ...]
-    ], 
-) -> Callable[..., T]:
+    ] = ..., 
+) -> Callable[..., Optional[T]]:
     ...
-
 @overload
 def suppressed(
     fn: Callable[..., T], 
     /, 
-    default: None, 
+    default: T = ..., 
     exceptions: Union[
         Type[BaseException], 
         Tuple[Type[BaseException], ...]
-    ], 
-) -> Callable[..., Optional[T]]:
+    ] = ..., 
+) -> Callable[..., T]:
     ...
-
 @optional_decorate
 def suppressed(fn, /, default=None, exceptions=Exception):
     def wrapper(*args, **kwds):

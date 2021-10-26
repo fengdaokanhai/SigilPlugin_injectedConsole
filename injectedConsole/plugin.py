@@ -3,7 +3,7 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 1, 9)
-__revision__ = 0
+__revision__ = 1
 
 import sys
 if sys.version_info < (3, 8):

@@ -29,8 +29,9 @@ from typing import Final, Mapping
 from types import MappingProxyType
 
 
-_injectedConsole_CONFIG: Final[dict] = __import__('json').load(open(args.args))
-_injectedConsole_PATH: Final[Mapping[str, str]] = MappingProxyType(_injectedConsole_CONFIG['path'])
+_config: Final[dict] = __import__('json').load(open(args.args))
+_injectedConsole_CONFIG: Final[Mapping] = MappingProxyType(_config['config'])
+_injectedConsole_PATH: Final[Mapping[str, str]] = MappingProxyType(_config['path'])
 setattr(builtins, '_injectedConsole_CONFIG', _injectedConsole_CONFIG)
 setattr(builtins, '_injectedConsole_PATH', _injectedConsole_PATH)
 
@@ -40,6 +41,10 @@ os.chdir(_injectedConsole_PATH['outdir'])
 from plugin_help import function
 
 os.environ['env'] = function._ENVFILE
+
+from plugin_util import usepip
+usepip._update_index_url(_injectedConsole_CONFIG['pip_index_url'])
+usepip._update_trusted_host(_injectedConsole_CONFIG['pip_trusted_host'])
 
 shell: str = args.shell
 if shell == 'nbterm':

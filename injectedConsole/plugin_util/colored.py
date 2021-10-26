@@ -21,7 +21,7 @@ __version__ = (0, 0, 2)
 from abc import ABC, abstractproperty
 from collections import namedtuple
 from enum import Enum
-from typing import Optional, Sequence, Tuple, Union
+from typing import cast, Optional, Sequence, Tuple, Union
 
 
 __all__ = [
@@ -497,7 +497,7 @@ def _make_color(
     color: Union[str, int, Tuple[int, ...], BaseColor], 
     kind: Union[int, str, GroundColorEnum] = GroundColorEnum.fg, 
 ) -> Union[BaseColor, int]:
-    kind = ensure_enum(kind, GroundColorEnum)
+    kind = cast(GroundColorEnum, ensure_enum(kind, GroundColorEnum))
     if not isinstance(color, BaseColor):
         if isinstance(color, int):
             color = Color(color)

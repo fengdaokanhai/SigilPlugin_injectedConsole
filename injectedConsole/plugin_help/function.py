@@ -50,9 +50,9 @@ _SYSTEM_IS_WINDOWS: Final[bool] = __import__('platform').system() == 'Windows'
 _injectedConsole_CONFIG: Final[dict] = getattr(builtins, '_injectedConsole_CONFIG')
 _injectedConsole_PATH: Final[Mapping] = getattr(builtins, '_injectedConsole_PATH')
 _OUTDIR: Final[str] = _injectedConsole_PATH['outdir']
-_ABORTFILE: Final[str] = _path.join(_OUTDIR, 'abort.exists')
+_ABORTFILE: Final[str] = _path.join(_OUTDIR, '.abort.exists')
+_PKLFILE: Final[str] = _path.join(_OUTDIR, '.wrapper.pkl')
 _ENVFILE: Final[str] = _path.join(_OUTDIR, 'env.py')
-_PKLFILE: Final[str] = _path.join(_OUTDIR, 'wrapper.pkl')
 _WRAPPER: Optional[Wrapper] = None
 _EDIT_CONTAINER: Optional[BookContainer] = None
 _INPUT_CONTAINER: Optional[InputContainer] = None

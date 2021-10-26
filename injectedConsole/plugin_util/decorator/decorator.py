@@ -82,17 +82,15 @@ def optional(
 
 
 def optional_decorate(
-    f: Optional[Callable] = None, 
+    f: Callable, 
     g: Optional[Callable] = None, 
     /, 
     *args,
     **kwds,
 ) -> Callable:
-    if f is None:
-        return ppartial(undefined, g, *args, **kwds)
     if g is None:
         return ppartial(f, undefined, *args, **kwds)
-    return update_wrapper(f(g, **kwds), g)
+    return update_wrapper(f(g, *args, **kwds), g)
 
 
 def optional_partial(

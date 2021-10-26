@@ -12,7 +12,7 @@ else
     VERSION=latest
 fi
 
-function createpack() {
+createpack() {
     local file=$1/${PROJNAME}_${VERSION}.zip
     if zip -q -r $file $PROJNAME
     then

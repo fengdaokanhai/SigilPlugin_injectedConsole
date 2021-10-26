@@ -7,7 +7,7 @@
 # https://pip.pypa.io/en/stable/
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 5)
+__version__ = (0, 0, 6)
 __all__ = [
     'check_pip', 'install_pip_by_ensurepip', 'install_pip_by_getpip', 
     'install_pip', 'execute_pip', 'execute_pip_in_child_process', 'install', 
@@ -19,7 +19,7 @@ import subprocess
 
 from sys import executable
 from tempfile import NamedTemporaryFile
-from typing import Final, Iterable, List, Optional, Sequence, Union
+from typing import Final, Iterable, List, Sequence, Union
 from types import ModuleType
 from urllib.parse import urlsplit
 from urllib.request import urlopen
@@ -35,6 +35,20 @@ INDEX_URL: str = 'https://mirrors.aliyun.com/pypi/simple/'
 # TRUSTED_HOST: Mark this host or host:port pair as trusted,
 #     even though it does not have valid or any HTTPS.
 TRUSTED_HOST: str = 'mirrors.aliyun.com'
+
+
+def _update_index_url(val: str):
+    globals()['INDEX_URL'] = val
+    install.__kwdefaults__['index_url'] = val # type: ignore
+    split_result = urlsplit(val)
+    if split_result.scheme == 'https':
+        _update_trusted_host(split_result.netloc)
+
+
+def _update_trusted_host(val: str):
+    globals()['TRUSTED_HOST'] = val
+    install.__kwdefaults__['trusted_host'] = val # type: ignore
+
 
 if _PLATFORM_IS_WINDOWS:
     import site as _site
@@ -102,7 +116,7 @@ def install_pip_by_ensurepip(*args: str) -> None:
         - https://docs.python.org/3/library/ensurepip.html
         - https://packaging.python.org/tutorials/installing-packages/#ensure-you-can-run-pip-from-the-command-line
     '''
-    from ensurepip import _main
+    from ensurepip import _main # type: ignore
     if not _main(list(args)):
         raise RuntimeError
 
@@ -118,7 +132,7 @@ def install_pip_by_getpip(
         - https://packaging.python.org/tutorials/installing-packages/#ensure-you-can-run-pip-from-the-command-line
     '''
     with NamedTemporaryFile(mode='wb', suffix='.py') as f:
-        f.write('''\
+        f.write(b'''\
 #!/usr/bin/env python
 if platform.system() == 'Windows':
     import site as _site
@@ -160,12 +174,13 @@ def install_pip(executable: str = executable) -> None:
             args.extend(('-i', index_url))
             if not trusted_host:
                 trusted_host = urlsplit(index_url).netloc
-            args.extend(('--trusted-host', trusted_host))
+            if trusted_host:
+                args.extend(('--trusted-host', trusted_host))
 
         install_pip_by_getpip(*args, check=True, executable=executable)
 
 
-def execute_pip(args: Sequence[str]) -> None:
+def execute_pip(args: Sequence[str]):
     'execute pip in same thread'
     from pip._internal import main
     return main(list(args))
@@ -188,23 +203,21 @@ def execute_pip_in_child_process(
 def install(
     package: str, 
     /, 
-    *other_packages: str,
-    upgrade: bool = False,
-    index_url: Optional[str] = None,
-    trusted_host: Optional[str] = None,
+    *other_packages: str, 
+    upgrade: bool = False, 
+    index_url: str = INDEX_URL, 
+    trusted_host: str = TRUSTED_HOST, 
     other_args: Iterable[str] = (), 
     new_process: bool = False, 
 ) -> None:
     'install package with pip'
     cmd = ['install']
-    if not index_url:
-        index_url = globals().get('INDEX_URL')
-        trusted_host = globals().get('TRUSTED_HOST')
     if index_url:
         cmd.extend(('-i', index_url))
         if not trusted_host:
             trusted_host = urlsplit(index_url).netloc
-        cmd.extend(('--trusted-host', trusted_host))
+        if trusted_host:
+            cmd.extend(('--trusted-host', trusted_host))
     if upgrade:
         cmd.append('--upgrade')
     cmd.extend(other_args)

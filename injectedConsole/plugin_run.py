@@ -11,6 +11,7 @@ import json
 import sys
 
 from contextlib import contextmanager
+from copy import deepcopy
 from importlib import import_module
 from os import path
 from typing import Final, Optional, Tuple
@@ -23,16 +24,16 @@ _IS_MACOS = __import__('platform').system() == 'Darwin'
 MUDULE_DIR: Final[str] = path.dirname(path.abspath(__file__))
 CONFIG_JSON_FILE: Final[str] = path.join(MUDULE_DIR, 'config.json')
 SHELLS: Final[Tuple[str, ...]] = (
-    'python',
-    'ipython',
-    'bpython',
-    'ptpython',
-    'ptipython',
-    'nbterm',
-    'qtconsole',
-    'spyder',
-    'jupyter lab',
-    'jupyter notebook',
+    'python', 
+    'ipython', 
+    'bpython', 
+    'ptpython', 
+    'ptipython', 
+    'nbterm', 
+    'qtconsole', 
+    'spyder', 
+    'jupyter lab', 
+    'jupyter notebook', 
 )
 
 
@@ -42,26 +43,26 @@ def _import_all(mod_name):
     return {k: get(k) for k in mod.__all__}
 
 
-'''
-@contextmanager
-def _ctx_conifg():
-    try:
-        old_config = json.load(open(CONFIG_JSON_FILE, encoding='utf-8'))
-    except (FileNotFoundError, json.JSONDecodeError):
-        old_config = {}
-
-    config = deepcopy(old_config)
-    yield config
-
-    if old_config != config:
-        json.dump(config, open(CONFIG_JSON_FILE, 'w', encoding='utf-8'), ensure_ascii=False)
-'''
-
-
 @contextmanager
 def _ctx_conifg(bc):
     config = bc.getPrefs()
+    default_config = config['default_config'] = {
+        'shell': 'python', 'errors': 'ignore', 'startup': [], 
+        'terminal': '', 'terminal_args': '', 'terminal_wait': True, 
+        'pip_index_url': 'https://mirrors.aliyun.com/pypi/simple/', 
+        'pip_trusted_host': 'mirrors.aliyun.com', 
+    }
+    if 'config' not in config:
+        config['config'] = deepcopy(default_config)
+    else:
+        config['config'].update(
+            (k, default_config[k])
+            for k in default_config.keys() - config['config'].keys()
+        )
+    if 'configs' not in config:
+        config['configs'] = []
     yield config
+    config.pop('default_config', None)
     bc.savePrefs(config)
 
 
@@ -91,10 +92,6 @@ def update_config_gui_tk(
         config.update(config_new)
         return config
     else:
-        if 'config' not in config:
-            config['config'] = {'shell': 'python', 'errors': 'ignore', 'startup': []}
-        if 'configs' not in config:
-            config['configs'] = []
         namespace = _import_all('plugin_util.tkinter_extensions')
         namespace.update(config=config, SHELLS=SHELLS)
 
@@ -110,7 +107,7 @@ def update_config_gui_qt(new_process: bool = _IS_MACOS) -> dict:
 
 def run(bc) -> Optional[int]:
     with _ctx_conifg(bc) as config:
-        config = update_config_gui_tk(config).get('config')
+        config = update_config_gui_tk(config)['config']
 
     laucher_file, ebook_root, outdir, _, target_file = sys.argv
     this_plugin_dir = path.dirname(target_file)
@@ -124,14 +121,17 @@ def run(bc) -> Optional[int]:
         ebook_root        = ebook_root,
         outdir            = outdir,
     )
-    config['path'] = pathes
 
-    setattr(builtins, '_injectedConsole_PATH', MappingProxyType(pathes))
     setattr(builtins, '_injectedConsole_CONFIG', config)
+    setattr(builtins, '_injectedConsole_PATH', MappingProxyType(pathes))
 
-    abortfile    = path.join(outdir, 'abort.exists')
+    from plugin_util import usepip
+    usepip._update_index_url(config['pip_index_url'])
+    usepip._update_trusted_host(config['pip_trusted_host'])
+
+    abortfile    = path.join(outdir, '.abort.exists')
+    argsserfile  = path.join(outdir, '.args.json')
     envfile      = path.join(outdir, 'env.py')
-    argsfile     = path.join(outdir, 'args.pkl')
     mainfile     = path.join(this_plugin_dir, 'plugin_main.py')
 
     from plugin_help import function
@@ -150,16 +150,24 @@ if getattr(__builtins, '_injectedConsole_RUNPY', False):
     🏃🏃🏃 环境早已被加载，忽略
 """)
 else:
-    # Injecting builtins variable: _injectedConsole_PATH
-    __builtins._injectedConsole_PATH = __import__('types').MappingProxyType({pathes!r})
+    from types import MappingProxyType
     # Injecting builtins variable: _injectedConsole_CONFIG
-    __builtins._injectedConsole_CONFIG = __import__('json').loads({json.dumps(config)!r})
+    __builtins._injectedConsole_CONFIG = MappingProxyType({config!r})
+    # Injecting builtins variable: _injectedConsole_PATH
+    __builtins._injectedConsole_PATH = MappingProxyType({pathes!r})
+    del MappingProxyType
 
     # Injecting module pathes
     __sys_path = __import__('sys').path
     __sys_path.insert(0, r'{this_plugin_dir}')
     __sys_path.insert(0, r'{sigil_package_dir}')
     del __sys_path
+
+    # Updating pip index_url and trusted_host
+    from plugin_util import usepip
+    usepip._update_index_url(r'{config['pip_index_url']}')
+    usepip._update_trusted_host(r'{config['pip_trusted_host']}')
+    del usepip
 
     __import__('os').chdir(r'{outdir}')
 
@@ -196,8 +204,8 @@ del __builtins
     else:
         from plugin_util.terminal import start_terminal
 
-        json.dump(config, open(argsfile, 'w'))
-        args = [sys.executable, mainfile, '--args', argsfile]
+        json.dump({'config': config, 'path': pathes}, open(argsserfile, 'w'))
+        args = [sys.executable, mainfile, '--args', argsserfile]
         if shell:
             args.extend(('--shell', shell))
         kwds = {}

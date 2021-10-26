@@ -667,11 +667,10 @@ class TkinterXMLConfigParser:
             locals = ChainMap(
                 globals, globals.get('namemap', self._namemap), extras)
 
-        pargs = tuple(self.parse_element(child, parent, globals) for child in el)
+        pargs: tuple = tuple(self.parse_element(child, parent, globals) for child in el)
+        kargs: dict
 
         args_str = el_attrib.get('args-')
-        pargs: tuple
-        kargs: dict
         if args_str is None:
             kargs = {}
         else:

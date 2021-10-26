@@ -11,7 +11,7 @@ __all__ = ['ppartial']
 
 class ppartial(partial):
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, /, *args, **kwargs):
         a, k = self.args, self.keywords
         k.update(kwargs)
         if undefined in a:

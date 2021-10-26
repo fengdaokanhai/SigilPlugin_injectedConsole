@@ -12,20 +12,20 @@ __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 5)
 
 import os
-import pickle
-import re
 import socket
-import uuid
 
 from contextlib import contextmanager
+from json import dump as json_dump, load as json_load
 from enum import Enum
+from multiprocessing.connection import Client, Listener
 from os import getcwd, getpid, remove, path as _path
-from shlex import quote as shlex_quote, split as shlex_split
+from shlex import join as shlex_join, quote as shlex_quote, split as shlex_split
 from subprocess import run as sprun, CompletedProcess
 from tempfile import NamedTemporaryFile
 from typing import (
     cast, Dict, Final, List, Optional, Sequence, Tuple, Union
 )
+from uuid import uuid4
 
 from .cm import ensure_cm
 from .shell_util import exists_execfile
@@ -33,25 +33,19 @@ from .run import wait_for_pid
 from .decorator import as_thread, suppressed, expand_by_args
 from .timeout import ThreadingTimeout
 
-try:
-    from shlex import join as shlex_join # type: ignore
-except ImportError:
-    def shlex_join(split_command: Sequence[str]) -> str: # type: ignore
-        """Return a shell-escaped string from *split_command*."""
-        return ' '.join(map(shlex_quote, split_command))
 
-
-__all__ = ['start_terminal', 'shlex_quote', 'shlex_join', 'winsh_quote', 'winsh_join', 
-           'start_windows_terminal', 'start_linux_terminal', 'AppleScriptWaitEvent', 
-           'start_macosx_terminal', 'open_macosx_terminal']
+__all__ = [
+    'start_terminal', 'start_windows_terminal', 'start_linux_terminal', 
+    'AppleScriptWaitEvent', 'start_macosx_terminal', 'run_macosx_terminal', 
+]
 
 
 _CURDIR: Final[str] = getcwd()
-_ENV_WAIT_PID_FILE = _path.join(_CURDIR, 'env_wait_pid.pkl')
+_ENV_WAIT_SERFILE = _path.join(_CURDIR, '.env_wait_pid.json')
 _PLATFORM = __import__('platform').system()
 
 
-def _remove_file(path):
+def _remove_file(path: Union[bytes, str]) -> bool:
     try:
         remove(path)
         return True
@@ -59,7 +53,7 @@ def _remove_file(path):
         return False
 
 
-def winsh_quote(part, _cre=re.compile(r'\s')):
+def winsh_quote(part, _cre=__import__('re').compile(r'\s')):
     'Return a shell-escaped string.'
     part = part.strip().replace(r'"', r'\"')
     if _cre.search(part) is not None:
@@ -72,15 +66,214 @@ def winsh_join(split_command: Sequence[str]) -> str:
     return ' '.join(map(winsh_quote, split_command))
 
 
+@expand_by_args
+def _wait_child_process(*args, **kwds):
+    raise NotImplementedError
+
+
+@_wait_child_process.register('tcpsock')
+@contextmanager
+def _waitcp_tcpsock(
+    address=None, 
+    timeout: Union[int, float] = 10, 
+    port_start: int = 10000, 
+):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+
+    if address is None:
+        for port in range(port_start, 65536):
+            address = ('', port)
+            try:
+                server.bind(address)
+                break
+            except OSError:
+                pass
+        else:
+            raise OSError('cannot bind port %d-65535' % port_start)
+    else:
+        server.bind(address)
+
+    server.settimeout(timeout)
+
+    @as_thread
+    def wait():
+        pid: int = 0
+        with server:
+            server.listen(1)
+            client, _ = server.accept()
+            with client:
+                pid = int(client.recv(1024)) 
+        if pid:
+            wait_for_pid(pid)
+
+    future = wait()
+    yield address
+    future.thread.join()
+
+
+@_wait_child_process.register('unixsock')
+@contextmanager
+def _waitcp_unixsock(
+    address=None, 
+    timeout: Union[int, float] = 10, 
+):
+    if address is None:
+        address = _path.abspath('.%s.sock' % uuid4())
+    else:
+        _remove_file(address)
+
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(address)
+    server.settimeout(timeout)
+
+    @as_thread
+    def wait():
+        pid: int = 0
+        with server:
+            server.listen(1)
+            client, _ = server.accept()
+            with client:
+                pid = int(client.recv(1024))
+        if pid:
+            wait_for_pid(pid)
+
+    future = wait()
+    try:
+        yield address
+        future.thread.join()
+    finally:
+        _remove_file(address)
+
+
+@_wait_child_process.register('namedpipe')
+@contextmanager
+def _waitcp_namedpipe(
+    address=None, 
+    timeout: Union[int, float] = 10, 
+):
+    if address is None:
+        address = _path.abspath('.%s.pipe' % uuid4())
+    else:
+        _remove_file(address)
+
+    # TODO: support Windows namedpipe
+    os.mkfifo(address)
+
+    @as_thread
+    def wait():
+        pid: int = 0
+        with ThreadingTimeout(timeout):
+            with open(address, 'rb') as f:
+                pid = int(f.read())
+        if pid:
+            wait_for_pid(pid)
+
+    future = wait()
+    try:
+        yield address
+        future.thread.join()
+    finally:
+        _remove_file(address)
+
+
+# NOTE: Reference
+# https://docs.python.org/3/library/multiprocessing.html#module-multiprocessing.connection
+@_wait_child_process.register('listener')
+@contextmanager
+def _waitcp_listener(
+    address=None, 
+    timeout: Union[int, float] = 10, 
+    port_start: int = 10000, 
+):
+    if address is None:
+        try:
+            address = _path.abspath('.%s.pipe' % uuid4())
+            server = Listener(address, authkey=b'injectedConsole')
+        except OSError:
+            for port in range(port_start, 65536):
+                address = ('', port)
+                try:
+                    server = Listener(address, authkey=b'injectedConsole')
+                    break
+                except OSError:
+                    pass
+            else:
+                raise OSError('cannot bind port %d-65535' % port_start)
+    else:
+        _remove_file(address)
+
+    @as_thread
+    def wait():
+        pid: int = 0
+        with ThreadingTimeout(timeout):
+            client = server.accept()
+            pid = client.recv()
+
+        if pid:
+            wait_for_pid(pid)
+
+    future = wait()
+    try:
+        yield address
+        future.thread.join()
+    finally:
+        _remove_file(address)
+
+
+@contextmanager
+def _wait_for_client(
+    server_type: str = 'listener', 
+    timeout: Union[int, float] = 10, 
+):
+    try:
+        with _wait_child_process(server_type, timeout=timeout) as address:
+            json_dump(
+                {'type': server_type, 'address': address}, 
+                open(_ENV_WAIT_SERFILE, 'w')
+            )
+            yield
+    finally:
+        _remove_file(_ENV_WAIT_SERFILE)
+
+
+@suppressed
+def _send_pid_to_server(env=None):
+    if env is None:
+        env = json_load(open(_ENV_WAIT_SERFILE, 'r'))
+
+    server_type, address = env['type'], env['address']
+    if server_type == 'tcpsock':
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(address)
+        with client:
+            client.send(str(getpid()).encode('latin-1'))
+    elif server_type == 'unixsock':
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(address)
+        with client:
+            client.send(str(getpid()).encode('latin-1'))
+    elif server_type == 'namedpipe':
+        client = open(address, 'wb')
+        with client:
+            client.write(str(getpid()).encode('latin-1'))
+    elif server_type == 'listener':
+        client = Client(address, authkey=b'injectedConsole')
+        with client:
+            client.send(getpid())
+    else:
+        raise NotImplementedError(server_type)
+
+
 def start_terminal(cmd, **kwargs) -> CompletedProcess:
     'Start a terminal emulator in current OS platform.'
     if _PLATFORM == 'Windows':
         return start_windows_terminal(cmd, **kwargs)
     elif _PLATFORM == 'Darwin':
         # TODO: Solve the custom terminal, just as Linux does
-        if kwargs.get('terminal', 'Terminal.app') == 'Terminal.app':
-            return start_macosx_terminal(cmd, **kwargs)
-        return open_macosx_terminal(cmd, **kwargs)
+        if kwargs.get('terminal', 'Terminal.app') in ('Terminal', 'Terminal.app'):
+            return run_macosx_terminal(cmd, **kwargs)
+        return start_macosx_terminal(cmd, **kwargs)
     elif _PLATFORM == 'Linux':
         return start_linux_terminal(cmd, **kwargs)
     else:
@@ -90,7 +283,7 @@ def start_terminal(cmd, **kwargs) -> CompletedProcess:
 
 def start_windows_terminal(
     cmd: Union[str, Sequence[str]], 
-    app: Optional[str] = 'powershell',
+    app: str = 'powershell',
     app_args: Union[None, str, Sequence[str]] = None, 
     wait: bool = True,
     with_tempfile: bool = False,
@@ -146,162 +339,6 @@ def start_windows_terminal(
         return sprun(split_command, check=True, shell=True)
 
 
-@expand_by_args
-def _wait_child_process(*args, **kwds):
-    raise NotImplementedError
-
-
-def _make_tcpsock(port: Optional[int] = None, port_start: int = 10000):
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    if port is None:
-        for port in range(port_start, 65536):
-            try:
-                server.bind(('0.0.0.0', port))
-                break
-            except socket.error:
-                pass
-        else:
-            raise OSError('cannot bind port %d-65535' % port_start)
-    else:
-        server.bind(('0.0.0.0', port))
-
-    return server
-
-
-@_wait_child_process.register('tcpsock')
-@contextmanager
-def _waitcp_tcpsock(timeout: Union[int, float] = 10):
-    server = _make_tcpsock()
-    server.settimeout(timeout)
-    address = server.getsockname()
-
-    @as_thread
-    def wait():
-        pid: int = 0
-        with server:
-            server.listen(1)
-            client, _ = server.accept()
-            with client:
-                pid = int(server.read())
-        if pid:
-            wait_for_pid(pid)
-
-    future = wait()
-    yield address
-    future.thread.join()
-
-
-def _make_unixsock(name=None):
-    if name is None:
-        name = '%s.sock' % uuid.uuid4()
-    else:
-        _remove_file(name)
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(name)
-
-    return server
-
-
-@_wait_child_process.register('unixsock')
-@contextmanager
-def _waitcp_unixsock(timeout: Union[int, float] = 10):
-    server = _make_unixsock()
-    server.settimeout(timeout)
-    address = server.getsockname()
-
-    @as_thread
-    def wait():
-        pid: int = 0
-        with server:
-            server.listen(1)
-            client, _ = server.accept()
-            with client:
-                pid = int(server.read())
-        if pid:
-            wait_for_pid(pid)
-
-    future = wait()
-    try:
-        yield address
-        future.thread.join()
-    finally:
-        _remove_file(address)
-
-
-def _make_namedpipe(name=None):
-    if name is None:
-        name = '%s.pipe' % uuid.uuid4()
-    else:
-        _remove_file(name)
-    os.mkfifo(name)
-    return name
-
-
-@_wait_child_process.register('namedpipe')
-@contextmanager
-def _waitcp_namedpipe(timeout: Union[int, float] = 10):
-    name = _make_namedpipe()
-
-    @as_thread
-    def wait():
-        pid: int = 0
-        with ThreadingTimeout(timeout):
-            with open(name, 'rb') as f:
-                pid = int(f.read())
-
-        if pid:
-            wait_for_pid(pid)
-
-    try:
-        future = wait()
-        future.thread.join()
-    finally:
-        _remove_file(name)
-
-
-# TODO: Refer to `multiprocessing.connection` for improvement
-#       https://github.com/python/cpython/blob/main/Lib/multiprocessing/connection.py
-@contextmanager
-def _wait_for_client(
-    server_type: str = 'tcpsock', 
-    timeout: Union[int, float] = 10, 
-):
-    try:
-        with _wait_child_process(server_type, timeout=timeout) as address:
-            pickle.dump(
-                {'type': server_type, 'address': address}, 
-                open(_ENV_WAIT_PID_FILE, 'wb')
-            )
-            yield
-    finally:
-        _remove_file(_ENV_WAIT_PID_FILE)
-
-
-@suppressed
-def _send_pid_to_server(env=None):
-    if env is None:
-        env = pickle.load(open(_ENV_WAIT_PID_FILE, 'rb'))
-
-    server_type, address = env['type'], env['address']
-    if server_type == 'tcpsock':
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect(address)
-        with client:
-            client.send(str(getpid()).encode('latin-1'))
-    elif server_type == 'unixsock':
-        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.connect(address)
-        with client:
-            client.send(str(getpid()).encode('latin-1'))
-    elif server_type == 'namedpipe':
-        client = open(address, 'wb')
-        with client:
-            client.write(str(getpid()).encode('latin-1'))
-    else:
-        raise NotImplementedError(server_type)
-
-
 def start_linux_terminal(
     cmd: Union[str, Sequence[str]], 
     app: Optional[str] = None, 
@@ -338,6 +375,7 @@ def start_linux_terminal(
         'xterm': ['-e']
     }
 
+    split_command: List[str] = []
     if app is None:
         # Debian Series
         # https://helpmanual.io/man1/x-terminal-emulator/
@@ -351,16 +389,16 @@ def start_linux_terminal(
             else:
                 raise NotImplementedError('Failed to detect the terminal app, '
                                           'please specify one')
-        app = cast(str, app)
-    split_command: List[str] = [app]
-    if app_args is None:
-        app_name = app.rsplit('/', 1)[-1]
-        app_args = cast(List[str], terminal_app_execute_args.get(app_name, []))
-    elif isinstance(app_args, str):
-        split_command.extend(shlex_split(app_args))
-    else:
-        split_command.extend(app_args)
-    with ensure_cm(_wait_for_client() if wait else None) as port:
+    if app:
+        split_command.append(app)
+        if app_args is None:
+            app_name = app.rsplit('/', 1)[-1]
+            split_command.extend(terminal_app_execute_args.get(app_name, []))
+        elif isinstance(app_args, str):
+            split_command.extend(shlex_split(app_args))
+        else:
+            split_command.extend(app_args)
+    with ensure_cm(_wait_for_client() if wait else None):
         if with_tempfile:
             with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
                 sprun(['chmod', '+x', f.name], check=True)
@@ -378,8 +416,47 @@ def start_linux_terminal(
             return sprun(split_command, check=True)
 
 
-AppleScriptWaitEvent = Enum('AppleScriptWaitEvent', ('exists', 'busy'))
+def start_macosx_terminal(
+    cmd: Union[str, Sequence[str]], 
+    app: str = 'Terminal.app', 
+    app_args: Union[None, str, Sequence[str]] = None, 
+    wait: bool = True,
+    with_tempfile: bool = False,
+    tempfile_suffix: str = '.command',
+    shebang: str = '#!/bin/sh',
+) -> CompletedProcess:
+    'Start a terminal emulator in MacOSX.'
+    split_command: List[str] = ['open']
+    if wait:
+        split_command.append('-W')
+    if app:
+        split_command.append('-a')
+        split_command.append(app)
+        if app_args is None:
+            pass
+        elif isinstance(app_args, str):
+            split_command.extend(shlex_split(app_args))
+        else:
+            split_command.extend(app_args)
+    if with_tempfile:
+        with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
+            sprun(['chmod', '+x', f.name], check=True)
+            if not isinstance(cmd, str):
+                cmd = cast(str, shlex_join(cmd))
+            f.write('%s\n%s\n' % (shebang, cmd))
+            f.flush()
+            split_command.append(f.name)
+            return sprun(split_command, check=True)
+    else:
+        if isinstance(cmd, str):
+            return sprun(shlex_join(split_command) + ' ' + cmd, 
+                         check=True, shell=True)
+        else:
+            split_command.extend(cmd)
+            return sprun(split_command, check=True)
 
+
+AppleScriptWaitEvent = Enum('AppleScriptWaitEvent', ('exists', 'busy'))
 
 def _get_wait_for_str(
     event: Union[int, str, AppleScriptWaitEvent],
@@ -388,7 +465,6 @@ def _get_wait_for_str(
         AppleScriptWaitEvent.exists: 'exists',
     },
 ) -> str:
-    ''
     if isinstance(event, str):
         event = AppleScriptWaitEvent[event]
     else:
@@ -397,7 +473,7 @@ def _get_wait_for_str(
     return _wait_for_str[event]
 
 
-def start_macosx_terminal(
+def run_macosx_terminal(
     cmd: Union[str, Sequence[str]], 
     app: str = 'Terminal.app', 
     app_args: Union[None, str, Sequence[str]] = None, 
@@ -426,48 +502,17 @@ end tell''' % _get_wait_for_str(wait_event)
             sprun(['chmod', '+x', f.name], check=True)
             f.write('%s\n%s\n' % (shebang, cmd))
             f.flush()
-            command = tpl_command.format(app=app, script=f.name)
+            command = tpl_command.format(
+                app=app.replace('"', r'\"'), 
+                script=f.name.replace('"', r'\"'), 
+            )
             return sprun(['osascript', '-e', command], check=True)
     else:
-        command = tpl_command.format(app=app, script=cmd.replace('"', '\\"'))
+        command = tpl_command.format(
+            app=app.replace('"', r'\"'), 
+            script=cmd.replace('"', r'\"'), 
+        )
         return sprun(['osascript', '-e', command], check=True)
-
-
-def open_macosx_terminal(
-    cmd: Union[str, Sequence[str]], 
-    app: str = 'Terminal.app', 
-    app_args: Union[None, str, Sequence[str]] = None, 
-    wait: bool = True,
-    with_tempfile: bool = False,
-    tempfile_suffix: str = '.command',
-    shebang: str = '#!/bin/sh',
-) -> CompletedProcess:
-    'Start a terminal emulator in MacOSX.'
-    split_command: List[str] = ['open']
-    if wait:
-        split_command.append('-W')
-    if app:
-        split_command.extend(('-a', app))
-    if isinstance(app_args, str):
-        split_command.extend(shlex_split(app_args))
-    else:
-        split_command.extend(app_args)
-    if with_tempfile:
-        with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
-            sprun(['chmod', '+x', f.name], check=True)
-            if not isinstance(cmd, str):
-                cmd = cast(str, shlex_join(cmd))
-            f.write('%s\n%s\n' % (shebang, cmd))
-            f.flush()
-            split_command.append(f.name)
-            return sprun(split_command, check=True)
-    else:
-        if isinstance(cmd, str):
-            return sprun(shlex_join(split_command) + ' ' + cmd, 
-                         check=True, shell=True)
-        else:
-            split_command.extend(cmd)
-            return sprun(split_command, check=True)
 
 
 if __name__ == '__main__':
