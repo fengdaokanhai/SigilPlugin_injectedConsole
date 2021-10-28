@@ -7,19 +7,17 @@
 #   - https://en.wikibooks.org/wiki/AppleScript_Programming
 #   - https://linux.die.net/man/8/update-alternatives
 
-
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
-__version__ = (0, 0, 5)
+__version__ = (0, 0, 6)
 
 import os
 import socket
 
 from contextlib import contextmanager
 from json import dump as json_dump, load as json_load
-from enum import Enum
 from multiprocessing.connection import Client, Listener
 from os import getcwd, getpid, remove, path as _path
-from shlex import join as shlex_join, quote as shlex_quote, split as shlex_split
+from shlex import join as shlex_join, split as shlex_split
 from subprocess import run as sprun, CompletedProcess
 from tempfile import NamedTemporaryFile
 from typing import (
@@ -31,12 +29,13 @@ from .cm import ensure_cm
 from .shell_util import exists_execfile
 from .run import wait_for_pid
 from .decorator import as_thread, suppressed, expand_by_args
+from .shell_util import winsh_join, winsh_quote
 from .timeout import ThreadingTimeout
 
 
 __all__ = [
     'start_terminal', 'start_windows_terminal', 'start_linux_terminal', 
-    'AppleScriptWaitEvent', 'start_macosx_terminal', 'run_macosx_terminal', 
+    'start_macosx_terminal', 'open_macosx_terminal', 
 ]
 
 
@@ -51,19 +50,6 @@ def _remove_file(path: Union[bytes, str]) -> bool:
         return True
     except OSError:
         return False
-
-
-def winsh_quote(part, _cre=__import__('re').compile(r'\s')):
-    'Return a shell-escaped string.'
-    part = part.strip().replace(r'"', r'\"')
-    if _cre.search(part) is not None:
-        part = r'"%s"' % part
-    return part
-
-
-def winsh_join(split_command: Sequence[str]) -> str:
-    'Return a shell-escaped string from *split_command*.'
-    return ' '.join(map(winsh_quote, split_command))
 
 
 @expand_by_args
@@ -270,9 +256,6 @@ def start_terminal(cmd, **kwargs) -> CompletedProcess:
     if _PLATFORM == 'Windows':
         return start_windows_terminal(cmd, **kwargs)
     elif _PLATFORM == 'Darwin':
-        # TODO: Solve the custom terminal, just as Linux does
-        if kwargs.get('terminal', 'Terminal.app') in ('Terminal', 'Terminal.app'):
-            return run_macosx_terminal(cmd, **kwargs)
         return start_macosx_terminal(cmd, **kwargs)
     elif _PLATFORM == 'Linux':
         return start_linux_terminal(cmd, **kwargs)
@@ -416,28 +399,91 @@ def start_linux_terminal(
             return sprun(split_command, check=True)
 
 
+def _run_osascript(script: str, /, *args: str, **kwds):
+    return sprun(['osascript', '-e', script, *args], **kwds)
+
+
 def start_macosx_terminal(
     cmd: Union[str, Sequence[str]], 
     app: str = 'Terminal.app', 
     app_args: Union[None, str, Sequence[str]] = None, 
-    wait: bool = True,
-    with_tempfile: bool = False,
-    tempfile_suffix: str = '.command',
-    shebang: str = '#!/bin/sh',
+    wait: bool = True, 
+    wait_command: str = '''\
+    repeat while w exists
+        delay 0.1
+    end repeat''', 
+    with_tempfile: bool = False, 
+    tempfile_suffix: str = '.command', 
+    shebang: str = '#!/bin/sh', 
+) -> CompletedProcess:
+    'Start a terminal emulator in MacOSX.'
+    if not isinstance(cmd, str):
+        cmd = cast(str, shlex_join(cmd))
+    if app_args is None:
+        if app in ('Terminal.app', 'Terminal', 'terminal'):
+            app_args = 'do script'
+        elif app in ('iTerm.app', 'iTerm', 'iterm'):
+            # NOTE: See: https://iterm2.com/documentation-scripting.html
+            app_args = 'create window with default profile command'
+    elif not isinstance(app_args, str):
+        app_args = shlex_join(app_args)
+    app_args = cast(str, app_args)
+    if wait:
+        tpl_command = '''\
+tell application "{app}"
+    activate
+    set w to ({app_args} "{command}")
+    %s
+end tell''' % wait_command
+    else:
+        tpl_command = '''\
+tell application "{app}"
+    activate
+    ({app_args} "{command}")
+end tell'''
+    if with_tempfile:
+        with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
+            sprun(['chmod', '+x', f.name], check=True)
+            f.write('%s\n%s\n' % (shebang, cmd))
+            f.flush()
+            return _run_osascript(tpl_command.format(
+                app=app.replace('"', r'\"'), 
+                app_args=app_args, 
+                command=f.name.replace('"', r'\"'), 
+            ), check=True)
+    else:
+        return _run_osascript(tpl_command.format(
+            app=app.replace('"', r'\"'), 
+            app_args=app_args, 
+            command=cmd.replace('"', r'\"'), 
+        ), check=True)
+
+
+def open_macosx_terminal(
+    cmd: Union[str, Sequence[str]], 
+    app: str = 'Terminal.app', 
+    app_args: Union[None, str, Sequence[str]] = None, 
+    wait: bool = True, 
+    with_tempfile: bool = True, 
+    tempfile_suffix: str = '.command', 
+    shebang: str = '#!/bin/sh', 
 ) -> CompletedProcess:
     'Start a terminal emulator in MacOSX.'
     split_command: List[str] = ['open']
-    if wait:
-        split_command.append('-W')
     if app:
         split_command.append('-a')
         split_command.append(app)
         if app_args is None:
-            pass
+            split_command.append('-n')
         elif isinstance(app_args, str):
             split_command.extend(shlex_split(app_args))
         else:
             split_command.extend(app_args)
+    if wait:
+        if '-W' not in split_command or '--wait-apps' not in split_command:
+            split_command.append('-W')
+    if '--args' not in split_command:
+        split_command.append('--args')
     if with_tempfile:
         with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
             sprun(['chmod', '+x', f.name], check=True)
@@ -454,65 +500,6 @@ def start_macosx_terminal(
         else:
             split_command.extend(cmd)
             return sprun(split_command, check=True)
-
-
-AppleScriptWaitEvent = Enum('AppleScriptWaitEvent', ('exists', 'busy'))
-
-def _get_wait_for_str(
-    event: Union[int, str, AppleScriptWaitEvent],
-    _wait_for_str: Dict[AppleScriptWaitEvent, str] = {
-        AppleScriptWaitEvent.busy: 'is busy',
-        AppleScriptWaitEvent.exists: 'exists',
-    },
-) -> str:
-    if isinstance(event, str):
-        event = AppleScriptWaitEvent[event]
-    else:
-        event = AppleScriptWaitEvent(event)
-    event = cast(AppleScriptWaitEvent, event)
-    return _wait_for_str[event]
-
-
-def run_macosx_terminal(
-    cmd: Union[str, Sequence[str]], 
-    app: str = 'Terminal.app', 
-    app_args: Union[None, str, Sequence[str]] = None, 
-    wait: bool = True, 
-    wait_event: Union[int, str, AppleScriptWaitEvent] = AppleScriptWaitEvent.exists,
-    with_tempfile: bool = False,
-    tempfile_suffix: str = '.command',
-    shebang: str = '#!/bin/sh',
-) -> CompletedProcess:
-    'Start a terminal emulator in MacOSX.'
-    if not isinstance(cmd, str):
-        cmd = cast(str, shlex_join(cmd))
-    if wait:
-        tpl_command = '''
-tell application "{app}"
-    activate
-    set w to do script "{script}"
-    repeat while w %s
-        delay 0.1
-    end repeat
-end tell''' % _get_wait_for_str(wait_event)
-    else:
-        tpl_command = 'tell application "{app}" to do script "{script}"'
-    if with_tempfile:
-        with NamedTemporaryFile(suffix=tempfile_suffix, mode='w') as f:
-            sprun(['chmod', '+x', f.name], check=True)
-            f.write('%s\n%s\n' % (shebang, cmd))
-            f.flush()
-            command = tpl_command.format(
-                app=app.replace('"', r'\"'), 
-                script=f.name.replace('"', r'\"'), 
-            )
-            return sprun(['osascript', '-e', command], check=True)
-    else:
-        command = tpl_command.format(
-            app=app.replace('"', r'\"'), 
-            script=cmd.replace('"', r'\"'), 
-        )
-        return sprun(['osascript', '-e', command], check=True)
 
 
 if __name__ == '__main__':

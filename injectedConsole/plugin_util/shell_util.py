@@ -3,12 +3,27 @@
 
 __author__  = 'ChenyangGao <https://chenyanggao.github.io/>'
 __version__ = (0, 0, 1)
-__all__ = ['exists_execfile', 'list_debian_apps', 'get_debian_default_app', 
-           'set_debian_default_app']
+__all__ = [
+    'winsh_quote', 'winsh_join', 'exists_execfile', 'list_debian_apps', 
+    'get_debian_default_app', 'set_debian_default_app', 
+]
 
 
 from subprocess import run as sprun, DEVNULL, PIPE
-from typing import List, Optional
+from typing import List, Optional, Sequence
+
+
+def winsh_quote(part, _cre=__import__('re').compile(r'\s')):
+    'Return a shell-escaped string.'
+    part = part.strip().replace(r'"', r'\"')
+    if _cre.search(part) is not None:
+        part = r'"%s"' % part
+    return part
+
+
+def winsh_join(split_command: Sequence[str]) -> str:
+    'Return a shell-escaped string from *split_command*.'
+    return ' '.join(map(winsh_quote, split_command))
 
 
 def exists_execfile(file: str) -> bool:

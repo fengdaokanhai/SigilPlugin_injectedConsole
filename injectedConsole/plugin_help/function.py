@@ -477,6 +477,7 @@ def _ensure_pyqt5():
     check_install('PyQt5.QtWebEngine', ('PyQtWebEngine', 'PyQtWebEngine-Qt5'))
     check_install('PyQt5.sip', 'PyQt5-sip')
     check_install('PyQt5.Qt5', 'PyQt5-Qt5')
+    # check_install('pyqt5_tools', 'pyqt5-tools')
 
 
 def start_qtconsole(
@@ -527,13 +528,13 @@ def start_jupyter_notebook(
     **prun_kwds, 
 ) -> subprocess.CompletedProcess:
     'Start a jupyter notebook process, and wait until it is terminated.'
-    check_install('jupyter')
+    check_install('notebook')
     if not args:
         args = ('--NotebookApp.notebook_dir="."', '--NotebookApp.open_browser=True', '-y')
     with _ctx_wrapper():
         _run_env_tips('jupyter notebook')
         return prun_module(
-            'jupyter', 'notebook', *args, executable=executable, **prun_kwds)
+            'notebook', *args, executable=executable, **prun_kwds)
 
 
 def start_jupyter_lab(
@@ -548,7 +549,7 @@ def start_jupyter_lab(
     with _ctx_wrapper():
         _run_env_tips('jupyter lab')
         return prun_module(
-            'jupyter', 'lab', *args, executable=executable, **prun_kwds)
+            'jupyterlab', *args, executable=executable, **prun_kwds)
 
 
 def start_python_shell(
